@@ -5,6 +5,7 @@ import type { Ctx } from "../ctx";
 import { log } from "../lib/log";
 import { normalizePhone } from "../lib/phone";
 import { sendText } from "../wa/send";
+import { recordStatuses } from "../wa/statuses";
 import { InboundMessageSchema, WebhookPayloadSchema, type Incoming, type InboundMessage } from "../wa/types";
 import { handleCustomer, sendMenu } from "./customer";
 import { handleOnboarding, needsOnboarding } from "./onboarding";
@@ -42,7 +43,7 @@ export async function enqueuePayload(deps: Deps, payload: unknown): Promise<numb
   let queued = 0;
   for (const entry of parsed.data.entry) {
     for (const change of entry.changes) {
-      for (const s of change.value.statuses ?? []) log.info("status", { status: s });
+      if (change.value.statuses?.length) await recordStatuses(deps, change.value.statuses);
       for (const raw of change.value.messages ?? []) {
         const m = InboundMessageSchema.safeParse(raw);
         if (!m.success) {

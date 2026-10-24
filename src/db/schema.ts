@@ -168,8 +168,27 @@ export const outbox = pgTable(
     waMessageId: text("wa_message_id"),
     sentAt: ts("sent_at"),
   },
-  (t) => [index("outbox_status_next").on(t.status, t.nextAttemptAt), index("outbox_to_created").on(t.to, t.createdAt)],
+  (t) => [
+    index("outbox_status_next").on(t.status, t.nextAttemptAt),
+    index("outbox_to_created").on(t.to, t.createdAt),
+    index("outbox_wa_message_id").on(t.waMessageId),
+  ],
 );
+
+/**
+ * Latest delivery status Meta reported for each outbound message. Its own
+ * table (not outbox columns) because a status can arrive before the worker
+ * has recorded the message id.
+ */
+export const waStatuses = pgTable("wa_statuses", {
+  waMessageId: text("wa_message_id").primaryKey(),
+  recipient: text("recipient").notNull(),
+  status: text("status", { enum: ["sent", "delivered", "read", "failed"] }).notNull(),
+  errorCode: integer("error_code"),
+  errorText: text("error_text"),
+  statusAt: ts("status_at").notNull(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
 
 /** Small shared key/value store: sync markers, alert dedupe. */
 export const kv = pgTable("kv", {

@@ -101,7 +101,7 @@ Then:
    - **Callback URL:** `https://<your-host>/webhook`
    - **Verify token:** the same value as `WA_VERIFY_TOKEN`
    - Click **Verify and save**. Meta calls `GET /webhook`, and the bot echoes the challenge.
-3. Under **Webhook fields**, **subscribe to `messages`**. Leave other fields off.
+3. Under **Webhook fields**, **subscribe to `messages`**. Leave other fields off. (Delivery statuses, sent / delivered / read / failed, also arrive on `messages`; the bot stores them in `wa_statuses`.)
 4. **App secret:** **App settings → Basic → App secret → Show**. Copy it into `WA_APP_SECRET`. The bot uses it to reject requests that didn't come from Meta.
 5. Check that the app is subscribed to the WhatsApp Business Account (usually automatic):
 

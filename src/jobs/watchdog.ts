@@ -1,7 +1,7 @@
-import { and, count, eq, gte, isNull, lt, lte, ne, or } from "drizzle-orm";
+import { and, count, eq, gt, gte, isNull, like, lt, lte, ne, notExists, or, inArray } from "drizzle-orm";
 import { formatInTimeZone } from "date-fns-tz";
 import type { Q } from "../db/client";
-import { inbox, kv, menus, outbox, payments } from "../db/schema";
+import { inbox, kv, menus, outbox, payments, waStatuses } from "../db/schema";
 import type { Deps } from "../flows/router";
 import { log } from "../lib/log";
 import { addDays, localDate, zonedInstant } from "../lib/time";
@@ -10,6 +10,7 @@ import { send } from "../wa/send";
 export const BACKLOG_MS = 2 * 60 * 1000;
 export const SUMMARY_GRACE_MS = 30 * 60 * 1000;
 export const UNVERIFIED_MS = 24 * 60 * 60 * 1000;
+export const UNDELIVERED_MS = 15 * 60 * 1000;
 
 /** Rows that are due but nobody has picked up for a while: the worker is stuck or down. */
 export async function backlog(db: Q, now: Date) {
@@ -65,6 +66,29 @@ export async function runWatchdog(deps: Deps): Promise<string[]> {
     );
   for (const m of late)
     await alert("summary_late", String(m.id), "cutoff summary not delivered 30 min after cutoff", { menuId: m.id, date: m.date });
+
+  // Summary handed to WhatsApp but never reached the owner's phone.
+  const [{ n: undelivered }] = (await db
+    .select({ n: count() })
+    .from(outbox)
+    .where(
+      and(
+        like(outbox.idemKey, "cutoff:%"),
+        eq(outbox.status, "done"),
+        lt(outbox.sentAt, new Date(now.getTime() - UNDELIVERED_MS)),
+        gt(outbox.sentAt, new Date(now.getTime() - UNVERIFIED_MS)),
+        notExists(
+          db
+            .select({ x: waStatuses.waMessageId })
+            .from(waStatuses)
+            .where(and(eq(waStatuses.waMessageId, outbox.waMessageId), inArray(waStatuses.status, ["delivered", "read"]))),
+        ),
+      ),
+    )) as [{ n: number }];
+  if (Number(undelivered) > 0)
+    await alert("summary_undelivered", today, "cutoff summary sent but not delivered to the owner's phone after 15 min", {
+      messages: Number(undelivered),
+    });
 
   // No menu published by the expected time on a kitchen day.
   const dow = DAY_NAMES[Number(formatInTimeZone(now, cfg.tz, "i")) % 7]!;

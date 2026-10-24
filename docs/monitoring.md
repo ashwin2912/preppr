@@ -11,6 +11,9 @@
 | `alert=queue_backlog` | Sentry (and `/readyz` 503) | Messages waiting more than 2 min: the worker is stuck or down |
 | `alert=inbound_dead` | Sentry | A customer message failed 3 times; the customer got an apology |
 | `alert=send_dead` | Sentry | A reply couldn't be delivered (permanent Graph error, or 6 failed attempts) |
+| `alert=delivery_failed` | Sentry | WhatsApp accepted a reply but couldn't deliver it (customer blocked the number, not on WhatsApp, …). The Graph error code and text are attached. |
+| `alert=owner_delivery_failed` | Sentry | Same, for a message to an owner number |
+| `alert=summary_undelivered` | Sentry | The cutoff summary was sent 15 min ago but never reached the owner's phone (phone off, no data). Call the owner. |
 | `alert=sheet_sync_failing` | Sentry | 3 Google Sheet syncs in a row failed |
 | Unverified payments | WhatsApp to the owner, once a day | A reported payment has waited more than 24 h |
 
@@ -52,6 +55,13 @@ UPDATE outbox SET status = 'pending', attempts = 0, next_attempt_at = now() WHER
 ```
 
 **Summary didn't arrive**: the owner sends `SUMMARY` (that also reopens their 24h window).
+
+**Did a customer get their message?** Delivery statuses are in `wa_statuses`:
+```sql
+SELECT o.created_at, o.payload_json->>'body' AS body, s.status, s.error_text
+FROM outbox o LEFT JOIN wa_statuses s ON s.wa_message_id = o.wa_message_id
+WHERE o."to" = '+12015551234' ORDER BY o.id DESC LIMIT 10;
+```
 
 **Customer stuck with the bot paused**: `RESUME <number>`.
 
