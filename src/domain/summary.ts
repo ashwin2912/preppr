@@ -25,6 +25,15 @@ export async function loadSummaryData(db: Q, menu: Menu, tz: string) {
 }
 
 const UNASSIGNED = "No area";
+
+/** Confirmed quantity per menu item, in menu order, skipping zeros. */
+export function kitchenTotals(menu: Menu, rows: SummaryRow[]): { name: string; qty: number }[] {
+  const qty = new Map<string, number>();
+  for (const r of rows)
+    if (r.order.status === "confirmed")
+      for (const l of r.order.lines) qty.set(l.item_id, (qty.get(l.item_id) ?? 0) + l.qty);
+  return menu.items.filter((i) => qty.get(i.id)).map((i) => ({ name: i.name, qty: qty.get(i.id)! }));
+}
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 /** Owner's cutoff report. Pure: amounts only from stored order lines. */
@@ -38,11 +47,8 @@ export function buildSummary(menu: Menu, rows: SummaryRow[], handoffs: HandoffRo
   out.push(`*${cfg.kitchenName} — ${formatDay(menu.date, cfg.tz)}*`);
   out.push(`Cutoff ${formatClock(menu.cutoffAt, cfg.tz)} · status ${menu.status}`);
 
-  // Kitchen totals, in menu order.
-  const qty = new Map<string, number>();
-  for (const r of confirmed) for (const l of r.order.lines) qty.set(l.item_id, (qty.get(l.item_id) ?? 0) + l.qty);
   out.push("", "*🍳 Kitchen totals*");
-  const kitchen = menu.items.filter((i) => qty.get(i.id)).map((i) => `${qty.get(i.id)} × ${i.name}`);
+  const kitchen = kitchenTotals(menu, rows).map((k) => `${k.qty} × ${k.name}`);
   out.push(kitchen.length ? kitchen.join("\n") : "No confirmed orders.");
 
   // Delivery list by area (configured order first, then anything else).

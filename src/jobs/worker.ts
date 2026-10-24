@@ -4,12 +4,18 @@ import { handleInbound, inboundFailed, type Deps } from "../flows/router";
 import { errFields, log } from "../lib/log";
 import { WaSendError } from "../wa/client";
 import { claimInbox, claimOutbox } from "./queue";
+import { sheetSyncer } from "./sheetSync";
 
 /** Delay before attempt n+1, indexed by attempts so far. Past the end: give up. */
 export const INBOX_BACKOFF_MS = [5_000, 30_000];
 export const OUTBOX_BACKOFF_MS = [2_000, 5_000, 15_000, 60_000, 180_000];
 
+export const SHEET_SYNC_MS = 30_000;
+
 export type WorkerOptions = { concurrency?: number; pollMs?: number };
+
+/** Background chores run from the worker loop (not from tick/drain). */
+type Periodic = { name: string; everyMs: number; run: () => Promise<void>; last: number };
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 1000);
 
@@ -26,11 +32,22 @@ export function createWorker(deps: Deps, opts: WorkerOptions = {}) {
   let wake: (() => void) | null = null;
   let kicked = false;
 
+  const periodic: Periodic[] = [];
   const kick = () => {
     kicked = true;
     wake?.();
   };
   const d: Deps = { ...deps, kick };
+  if (d.sheets) periodic.push({ name: "sheet_sync", everyMs: SHEET_SYNC_MS, run: sheetSyncer(d), last: 0 });
+
+  async function runPeriodic() {
+    const t = Date.now();
+    for (const p of periodic) {
+      if (t - p.last < p.everyMs) continue;
+      p.last = t;
+      await p.run().catch((e) => log.error("periodic task failed", { task: p.name, ...errFields(e) }));
+    }
+  }
 
   async function inboxRow(row: InboxRow) {
     try {
@@ -111,6 +128,7 @@ export function createWorker(deps: Deps, opts: WorkerOptions = {}) {
         } catch (e) {
           log.error("worker tick failed", errFields(e));
         }
+        await runPeriodic();
         if (n === 0 && running && !kicked)
           await new Promise<void>((resolve) => {
             const t = setTimeout(resolve, pollMs);

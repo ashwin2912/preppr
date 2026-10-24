@@ -6,6 +6,7 @@ Built for a home-style tiffin service doing ~500 orders a day on the official Wh
 
 - **Ordering in chat:** onboarding (name, area, address), free-text orders in English/Hindi/Hinglish, edits, cancel, "same as yesterday", Confirm/Change buttons.
 - **Owner commands over WhatsApp:** `MENU` to publish the day's menu, `SUMMARY`, `ORDERS`, `CLOSE`, `OPEN`, `RESUME`, plus payment commands.
+- **Google Sheet:** orders (a tab per day, with kitchen totals), customers with balances, and payments, synced about every 30 s.
 - **Payments and balances:** customers report payments in chat ("paid $20 zelle"); the owner verifies with one tap. One ledger covers pay-per-order and prepaid customers.
 - **Cutoff summary:** kitchen totals per item, deliveries by area, unconfirmed drafts, anything that needs a human.
 - **Safe by default:** webhook signature check, idempotent message handling, per-customer locking, replies only inside WhatsApp's free 24-hour window.
@@ -75,6 +76,7 @@ CSV header: `phone,name,area,address_note` (optional extra column `notes`). Phon
 ## Docs
 
 - [docs/meta-setup.md](docs/meta-setup.md): WhatsApp Cloud API setup, step by step. Start business verification early; it takes days.
+- [docs/google-sheet-setup.md](docs/google-sheet-setup.md): Google Sheet export of orders, customers and payments.
 - [docs/production-readiness.md](docs/production-readiness.md): what's left before launch, reliability work, parsing cost options.
 - [system-design.md](system-design.md): architecture and flow diagrams, running on a laptop.
 
@@ -124,6 +126,7 @@ src/flows/handoff.ts    owner notification + bot pause
 src/flows/payments.ts   reported payments, verify/reject, PAID/BALANCE/DUES/BLOCK
 src/domain/ledger.ts    balances (confirmed orders − verified payments)
 src/jobs/worker.ts      inbox/outbox worker (src/jobs/queue.ts: claiming)
+src/jobs/sheetSync.ts   DB → Google Sheet (src/sheets/client.ts: REST + service account)
 src/jobs/cutoff.ts      close menus, send summary once
 src/domain/*            menu/order/summary formatting and math, CSV import
 src/llm/anthropic.ts    Claude prompts (structured outputs)

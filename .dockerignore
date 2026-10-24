@@ -3,3 +3,4 @@ dist
 .env
 *.csv
 .git
+secrets/

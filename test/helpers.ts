@@ -3,6 +3,7 @@ import { loadConfig } from "../src/config";
 import { connectPglite, type DB } from "../src/db/client";
 import { matchItem } from "../src/domain/order";
 import type { InterpretInput, Interpretation, Llm, ParsedMenu } from "../src/llm/types";
+import type { SheetSink } from "../src/sheets/client";
 import { DryRunWaClient } from "../src/wa/client";
 import { sign } from "../src/wa/signature";
 import type { Outbound } from "../src/wa/types";
@@ -111,7 +112,7 @@ export class FakeLlm implements Llm {
 let msgSeq = 0;
 
 export async function harness(
-  opts: { start?: Date; llm?: Llm; printOutbound?: boolean; db?: DB; concurrency?: number } = {},
+  opts: { start?: Date; llm?: Llm; printOutbound?: boolean; db?: DB; concurrency?: number; sheets?: SheetSink } = {},
 ) {
   const start = opts.start ?? new Date("2026-10-19T12:00:00Z"); // Mon 8:00 AM ET
   const cfg = loadConfig(testEnv as unknown as NodeJS.ProcessEnv);
@@ -120,7 +121,7 @@ export async function harness(
   const fake = new FakeLlm();
   const llm = opts.llm ?? fake;
   const clock = { now: start };
-  const deps = { db, wa, llm, cfg, now: () => clock.now };
+  const deps = { db, wa, llm, cfg, sheets: opts.sheets, now: () => clock.now };
   // One row at a time: PGlite is a single connection, and it keeps tests deterministic.
   const { app, drain, worker } = createApp(deps, { concurrency: opts.concurrency ?? 1 });
 

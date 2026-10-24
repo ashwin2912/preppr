@@ -5,6 +5,7 @@ import { connectPglite, connectPostgres } from "./db/client";
 import { log } from "./lib/log";
 import { loadDotEnv } from "./lib/env";
 import { llmFromEnv } from "./llm";
+import { GoogleSheetSink } from "./sheets/client";
 import { DryRunWaClient, GraphWaClient } from "./wa/client";
 
 loadDotEnv();
@@ -16,7 +17,9 @@ const wa = cfg.waDryRun ? new DryRunWaClient() : new GraphWaClient(cfg.waToken, 
 const picked = llmFromEnv();
 if (!picked) throw new Error("No parser API key: set ANTHROPIC_API_KEY, or LLM_PROVIDER + LLM_API_KEY + LLM_MODEL");
 const { llm, label } = picked;
-const { app, worker } = createApp({ db, wa, llm, cfg, now: () => new Date() });
+const sheets = cfg.googleServiceAccountJson && cfg.sheetId ? new GoogleSheetSink(cfg.googleServiceAccountJson, cfg.sheetId) : undefined;
+if (!sheets) log.warn("Google Sheet sync off: set GOOGLE_SERVICE_ACCOUNT_JSON and SHEET_ID to turn it on");
+const { app, worker } = createApp({ db, wa, llm, cfg, sheets, now: () => new Date() });
 
 const server = serve({ fetch: app.fetch, port: cfg.port }, (info) => log.info("listening", { port: info.port, dryRun: cfg.waDryRun, parser: label }));
 worker.start();

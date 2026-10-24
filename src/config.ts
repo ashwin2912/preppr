@@ -27,6 +27,8 @@ const EnvSchema = z.object({
   PAYMENT_INSTRUCTIONS: z.string().default(""),
   KITCHEN_NAME: z.string().default("Tiffin Kitchen"),
   JOB_SECRET: z.string().min(1),
+  GOOGLE_SERVICE_ACCOUNT_JSON: z.string().optional(),
+  SHEET_ID: z.string().optional(),
 });
 
 export type Config = {
@@ -48,6 +50,9 @@ export type Config = {
   paymentInstructions: string;
   kitchenName: string;
   jobSecret: string;
+  /** Both set = Google Sheet sync on. */
+  googleServiceAccountJson?: string;
+  sheetId?: string;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -78,5 +83,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     paymentInstructions: e.PAYMENT_INSTRUCTIONS,
     kitchenName: e.KITCHEN_NAME,
     jobSecret: e.JOB_SECRET,
+    googleServiceAccountJson: e.GOOGLE_SERVICE_ACCOUNT_JSON || undefined,
+    sheetId: e.SHEET_ID || undefined,
   };
 }
