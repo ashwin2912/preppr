@@ -40,7 +40,7 @@ export async function runCutoff(deps: Deps) {
         .where(and(eq(menus.id, m.id), isNull(menus.summarySentAt)))
         .returning();
       if (!claimed) return;
-      const ctx = { ...deps, db: tx };
+      const ctx = { ...deps, db: tx, out: { prefix: `cutoff:${m.id}:${now.getTime()}`, n: 0 } };
       let sent = false;
       for (const owner of deps.cfg.ownerNumbers) {
         try {

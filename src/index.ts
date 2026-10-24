@@ -16,6 +16,21 @@ const wa = cfg.waDryRun ? new DryRunWaClient() : new GraphWaClient(cfg.waToken, 
 const picked = llmFromEnv();
 if (!picked) throw new Error("No parser API key: set ANTHROPIC_API_KEY, or LLM_PROVIDER + LLM_API_KEY + LLM_MODEL");
 const { llm, label } = picked;
-const { app } = createApp({ db, wa, llm, cfg, now: () => new Date() });
+const { app, worker } = createApp({ db, wa, llm, cfg, now: () => new Date() });
 
-serve({ fetch: app.fetch, port: cfg.port }, (info) => log.info("listening", { port: info.port, dryRun: cfg.waDryRun, parser: label }));
+const server = serve({ fetch: app.fetch, port: cfg.port }, (info) => log.info("listening", { port: info.port, dryRun: cfg.waDryRun, parser: label }));
+worker.start();
+
+// Cloud Run sends SIGTERM before stopping an instance. Unfinished rows stay in
+// Postgres either way; this just avoids waiting out their leases.
+let stopping = false;
+const shutdown = async (signal: string) => {
+  if (stopping) return;
+  stopping = true;
+  log.info("shutting down", { signal });
+  server.close();
+  await worker.stop();
+  process.exit(0);
+};
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));

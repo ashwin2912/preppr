@@ -31,19 +31,19 @@ Everything the bot depends on is a link in a chain: WhatsApp Cloud API, the host
 
 ## 3. Reliability work: needed for 99%
 
-### 6. Durable inbox
+### 6. Durable inbox (done)
 
 **Problem:** the webhook replies 200 to Meta *before* the message is saved. If the process crashes or restarts in between, the message is lost, and Meta won't resend it because it got a 200.
 
 **Fix:** insert the raw message into an inbox table, *then* return 200. A worker processes the inbox with retries. [`pg-boss`](https://github.com/timgit/pg-boss) provides this on top of Postgres, with no new infrastructure.
 
-### 7. Short transactions
+### 7. Short transactions (done)
 
 **Problem:** each message holds a database transaction, and therefore a pooled connection, open for the whole Claude call and the WhatsApp sends (1–3 s). The pool has 10 connections, so the rush right after the broadcast queues up.
 
 **Fix:** keep the per-phone lock, but read state, call Claude outside any transaction, then write and send in short steps.
 
-### 8. Outbound retries
+### 8. Outbound retries (done)
 
 **Problem:** a failed WhatsApp API send is logged and dropped. The customer never sees their summary or confirmation.
 
@@ -73,7 +73,7 @@ flowchart LR
 - [ ] Alert when the cutoff summary hasn't been delivered by 30 minutes after cutoff.
 - [ ] A morning "bot is alive" check: the owner's `MENU` reply already confirms it end to end. If no MENU has arrived by 9 AM, alert.
 
-### 11. Abuse protection
+### 11. Abuse protection (done)
 
 Rate limit per phone, e.g. at most 20 messages per 10 minutes, and silently ignore the excess. Stops one spammer from running up model costs or slowing everyone else down.
 

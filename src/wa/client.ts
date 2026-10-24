@@ -2,6 +2,21 @@ import { toWaId } from "../lib/phone";
 import { log } from "../lib/log";
 import type { Outbound } from "./types";
 
+/** Graph API codes worth retrying: throughput limit, pair rate limit, temporary error. */
+const RETRYABLE_CODES = new Set([130429, 131056, 131000, 2]);
+
+export class WaSendError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: number | null,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = "WaSendError";
+  }
+}
+
 export interface WaClient {
   /** Returns the outbound wamid. */
   send(msg: Outbound): Promise<string>;
@@ -73,7 +88,11 @@ export class GraphWaClient implements WaClient {
       body: JSON.stringify(body),
     });
     const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`Graph API ${res.status}: ${JSON.stringify(json)}`);
+    if (!res.ok) {
+      const code = typeof json?.error?.code === "number" ? json.error.code : null;
+      const retryable = res.status >= 500 || res.status === 429 || (code !== null && RETRYABLE_CODES.has(code));
+      throw new WaSendError(`Graph API ${res.status}: ${JSON.stringify(json)}`, res.status, code, retryable);
+    }
     return json;
   }
 
@@ -100,9 +119,17 @@ export class GraphWaClient implements WaClient {
 export class DryRunWaClient implements WaClient {
   sent: Outbound[] = [];
   private n = 0;
+  private failures: Error[] = [];
   constructor(private print = true) {}
 
+  /** Make the next `n` sends throw `err` (tests). */
+  failNext(n: number, err: Error = new WaSendError("Graph API 503", 503, null, true)) {
+    for (let i = 0; i < n; i++) this.failures.push(err);
+  }
+
   async send(msg: Outbound): Promise<string> {
+    const fail = this.failures.shift();
+    if (fail) throw fail;
     this.sent.push(msg);
     if (this.print) console.log(renderOutbound(msg));
     return `dry-${++this.n}-${Date.now()}`;

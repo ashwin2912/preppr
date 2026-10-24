@@ -1,15 +1,15 @@
-import { eq, sql } from "drizzle-orm";
+import { and, count, eq, gte } from "drizzle-orm";
 import type { DB } from "../db/client";
-import { customers, messages } from "../db/schema";
+import { customers, inbox, messages, type InboxRow } from "../db/schema";
 import type { Ctx } from "../ctx";
-import { errFields, log } from "../lib/log";
+import { log } from "../lib/log";
 import { normalizePhone } from "../lib/phone";
 import { sendText } from "../wa/send";
 import { InboundMessageSchema, WebhookPayloadSchema, type Incoming, type InboundMessage } from "../wa/types";
 import { handleCustomer, sendMenu } from "./customer";
 import { handleOnboarding, needsOnboarding } from "./onboarding";
 import { handleOwner } from "./owner";
-import { getState } from "./state";
+import { getState, tagIntent } from "./state";
 import { currentMenu, ordersOpen } from "../domain/menu";
 
 export type Deps = Omit<Ctx, "db"> & { db: DB };
@@ -26,13 +26,18 @@ export function toIncoming(m: InboundMessage, phone: string): Incoming {
   };
 }
 
-/** Entry point for one verified webhook body. Never throws. */
-export async function processPayload(deps: Deps, payload: unknown) {
+/**
+ * Webhook side: save every inbound message to the inbox. Must finish before
+ * the webhook returns 200; a throw means "not saved" and the webhook returns
+ * 500 so Meta redelivers. Duplicate deliveries stop at the unique wamid.
+ */
+export async function enqueuePayload(deps: Deps, payload: unknown): Promise<number> {
   const parsed = WebhookPayloadSchema.safeParse(payload);
   if (!parsed.success) {
     log.warn("unrecognized webhook payload", { issues: parsed.error.issues.slice(0, 3) });
-    return;
+    return 0;
   }
+  let queued = 0;
   for (const entry of parsed.data.entry) {
     for (const change of entry.changes) {
       for (const s of change.value.statuses ?? []) log.info("status", { status: s });
@@ -42,57 +47,73 @@ export async function processPayload(deps: Deps, payload: unknown) {
           log.warn("unparseable message", { raw });
           continue;
         }
-        try {
-          await handleInbound(deps, m.data);
-        } catch (e) {
-          log.error("handleInbound failed", { id: m.data.id, ...errFields(e) });
+        const phone = normalizePhone(m.data.from);
+        if (!phone) {
+          log.warn("bad sender number", { from: m.data.from });
+          continue;
         }
+        const now = deps.now();
+        const inserted = await deps.db
+          .insert(inbox)
+          .values({ waMessageId: m.data.id, phone, payload: m.data, createdAt: now, nextAttemptAt: now })
+          .onConflictDoNothing()
+          .returning({ id: inbox.id });
+        if (inserted.length) queued++;
+        else log.info("duplicate delivery ignored", { id: m.data.id });
       }
     }
   }
+  return queued;
 }
 
-export async function handleInbound(deps: Deps, m: InboundMessage) {
-  const phone = normalizePhone(m.from);
-  if (!phone) {
-    log.warn("bad sender number", { from: m.from });
-    return;
-  }
-  const msg = toIncoming(m, phone);
+export const RATE_LIMIT = { max: 20, windowMs: 10 * 60 * 1000 };
 
-  await deps.db.transaction(async (tx) => {
-    // Serialize all handling per phone so rapid messages can't race on state/orders.
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone}))`);
+/**
+ * Worker side: handle one claimed inbox row. The worker guarantees one row per
+ * phone at a time, in arrival order, so no long transaction or lock is held
+ * here (the model call can take seconds). Throws to ask the worker to retry.
+ */
+export async function handleInbound(deps: Deps, row: InboxRow) {
+  const msg = toIncoming(row.payload, row.phone);
+  const phone = row.phone;
 
-    // Idempotency gate: Meta may deliver the same message more than once.
-    const inserted = await tx
-      .insert(messages)
-      .values({
-        waMessageId: msg.id,
-        phone,
-        direction: "in",
-        type: msg.type,
-        body: msg.text || null,
-        raw: m,
-        createdAt: deps.now(),
-      })
-      .onConflictDoNothing()
-      .returning({ id: messages.waMessageId });
-    if (!inserted.length) {
-      log.info("duplicate delivery ignored", { id: msg.id });
+  // Retries find this row already there. Stamped with receipt time so the 24h window is exact.
+  await deps.db
+    .insert(messages)
+    .values({
+      waMessageId: msg.id,
+      phone,
+      direction: "in",
+      type: msg.type,
+      body: msg.text || null,
+      raw: row.payload,
+      createdAt: row.createdAt,
+    })
+    .onConflictDoNothing();
+
+  const ctx: Ctx = { ...deps, out: { prefix: msg.id, n: 0 } };
+
+  if (!ctx.cfg.ownerNumbers.includes(phone)) {
+    const since = new Date(row.createdAt.getTime() - RATE_LIMIT.windowMs);
+    const [{ n }] = (await deps.db
+      .select({ n: count() })
+      .from(messages)
+      .where(and(eq(messages.phone, phone), eq(messages.direction, "in"), gte(messages.createdAt, since)))) as [{ n: number }];
+    if (n > RATE_LIMIT.max) {
+      log.warn("rate limited", { phone, n });
+      await tagIntent(ctx, msg.id, "rate_limited");
       return;
     }
+  }
 
-    const ctx: Ctx = { ...deps, db: tx };
-    void deps.wa.markReadTyping(msg.id);
-    try {
-      await route(ctx, msg);
-    } catch (e) {
-      // Keep the inbound row (commit) so duplicates stay deduped, and tell the sender.
-      log.error("route failed", { id: msg.id, phone, ...errFields(e) });
-      await sendText(ctx, phone, "Sorry, something went wrong on our side. Please try again in a minute 🙏");
-    }
-  });
+  if (row.attempts === 1) void deps.wa.markReadTyping(msg.id);
+  await route(ctx, msg);
+}
+
+/** Called once an inbox row has used up its retries. */
+export async function inboundFailed(deps: Deps, row: InboxRow) {
+  const ctx: Ctx = { ...deps, out: { prefix: `${row.waMessageId}:failed`, n: 0 } };
+  await sendText(ctx, row.phone, "Sorry, something went wrong on our side. Please try again in a minute 🙏");
 }
 
 async function route(ctx: Ctx, msg: Incoming) {

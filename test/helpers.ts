@@ -96,17 +96,18 @@ export class FakeLlm implements Llm {
 let msgSeq = 0;
 
 export async function harness(
-  opts: { start?: Date; llm?: Llm; printOutbound?: boolean } = {},
+  opts: { start?: Date; llm?: Llm; printOutbound?: boolean; db?: DB; concurrency?: number } = {},
 ) {
   const start = opts.start ?? new Date("2026-10-19T12:00:00Z"); // Mon 8:00 AM ET
   const cfg = loadConfig(testEnv as unknown as NodeJS.ProcessEnv);
-  const db: DB = await connectPglite();
+  const db: DB = opts.db ?? (await connectPglite());
   const wa = new DryRunWaClient(opts.printOutbound ?? false);
   const fake = new FakeLlm();
   const llm = opts.llm ?? fake;
   const clock = { now: start };
   const deps = { db, wa, llm, cfg, now: () => clock.now };
-  const { app, drain } = createApp(deps);
+  // One row at a time: PGlite is a single connection, and it keeps tests deterministic.
+  const { app, drain, worker } = createApp(deps, { concurrency: opts.concurrency ?? 1 });
 
   type In = string | { replyId: string; title?: string } | { type: "audio" | "image" };
 
@@ -164,5 +165,5 @@ export async function harness(
     return say(phone, address);
   }
 
-  return { cfg, db, wa, llm: fake, clock, app, drain, post, payload, say, texts, advance, buttonsOf, publishMenu, onboard };
+  return { cfg, db, wa, llm: fake, clock, app, drain, worker, post, payload, say, texts, advance, buttonsOf, publishMenu, onboard };
 }

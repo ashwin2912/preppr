@@ -84,4 +84,5 @@ h.advance(3 * 60 * MIN);
 await say(MEERA, real ? "1 more dal please" : "1 dal");
 console.log("\n>> Cloud Scheduler: POST /jobs/cutoff");
 console.log(JSON.stringify(await runCutoff({ db: h.db, wa: h.wa, llm: h.llm, cfg: h.cfg, now: () => h.clock.now })));
+await h.drain();
 process.exit(0);

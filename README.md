@@ -99,8 +99,11 @@ If the owner hasn't messaged the bot in 24 h (normally the morning `MENU` covers
 
 ## Design notes
 
-- **Idempotency:** each inbound `wamid` is inserted with `ON CONFLICT DO NOTHING`; a duplicate delivery stops there.
-- **Per-customer ordering:** each message is handled in a transaction holding `pg_advisory_xact_lock(hashtext(phone))`, so two quick messages from one person can't race.
+- **Durable inbox:** the webhook saves each inbound message to the `inbox` table before returning 200 (a failed save returns 500 so Meta redelivers). A worker in the same process handles it, retrying twice (5 s, 30 s) before giving up with an apology. A crash loses nothing: unfinished rows are picked up again when their 2-minute lease expires.
+- **Idempotency:** the inbox is unique on `wamid`, so a duplicate delivery stops there.
+- **Per-customer ordering:** the worker claims at most one message per phone at a time, oldest first, so two quick messages from one person can't race. No transaction is held during the model call.
+- **Outbox:** every reply is queued in `outbox` and sent by the worker with retries (2 s → 3 min backoff, 6 attempts; Graph 4xx errors fail at once). Keys are `<inbound wamid>:<n>`, so a retried handler can't send a reply twice. A recipient's messages always go out in order.
+- **Rate limit:** more than 20 messages from one customer in 10 minutes are recorded and ignored (`intent = rate_limited`).
 - **Money:** the model only returns item ids and quantities. Prices and totals are computed in code from the menu (`src/domain/order.ts`).
 - **Clarify once, then hand off:** low confidence or unmatched items get one clarifying question. If the reply is still unclear, the owner gets a handoff and the bot pauses for that customer for 4 h (or until `RESUME`).
 - **Stale buttons:** Confirm button ids carry the order version, so an old summary can't confirm a newer edit.

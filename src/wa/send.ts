@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
-import { messages } from "../db/schema";
+import { messages, outbox } from "../db/schema";
 import type { Q } from "../db/client";
-import { errFields, log } from "../lib/log";
+import { log } from "../lib/log";
 import type { Ctx } from "../ctx";
 import { BODY_MAX } from "./client";
 import type { Outbound } from "./types";
@@ -26,32 +27,22 @@ export async function windowOpen(ctx: Ctx, phone: string): Promise<boolean> {
 /**
  * The only way the bot sends anything. Refuses (and logs) when the
  * recipient's 24h customer-service window is closed, since the MVP sends
- * no templates. Returns true if sent.
+ * no templates. Otherwise queues the message in the outbox, which the worker
+ * sends with retries (src/jobs/worker.ts). Returns true if queued.
  */
 export async function send(ctx: Ctx, msg: Outbound): Promise<boolean> {
   if (!(await windowOpen(ctx, msg.to))) {
     log.warn("window_closed: send blocked", { to: msg.to, kind: msg.kind, body: msg.body.slice(0, 200) });
     return false;
   }
-  try {
-    const id = await ctx.wa.send(msg);
-    await ctx.db
-      .insert(messages)
-      .values({
-        waMessageId: id,
-        phone: msg.to,
-        direction: "out",
-        type: msg.kind,
-        body: msg.body,
-        raw: msg,
-        createdAt: ctx.now(),
-      })
-      .onConflictDoNothing();
-    return true;
-  } catch (e) {
-    log.error("send failed", { to: msg.to, ...errFields(e) });
-    return false;
-  }
+  const idemKey = ctx.out ? `${ctx.out.prefix}:${ctx.out.n++}` : `adhoc:${randomUUID()}`;
+  const now = ctx.now();
+  await ctx.db
+    .insert(outbox)
+    .values({ idemKey, to: msg.to, payload: msg, createdAt: now, nextAttemptAt: now })
+    .onConflictDoNothing();
+  ctx.kick?.();
+  return true;
 }
 
 export const sendText = (ctx: Ctx, to: string, body: string) => send(ctx, { kind: "text", to, body });

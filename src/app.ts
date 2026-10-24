@@ -1,18 +1,16 @@
 import { Hono } from "hono";
-import { processPayload, type Deps } from "./flows/router";
+import { enqueuePayload, type Deps } from "./flows/router";
 import { runCutoff } from "./jobs/cutoff";
+import { createWorker, type WorkerOptions } from "./jobs/worker";
 import { errFields, log } from "./lib/log";
 import { secretEquals, verifySignature } from "./wa/signature";
 
-export function createApp(deps: Deps) {
+export function createApp(baseDeps: Deps, workerOpts?: WorkerOptions) {
   const app = new Hono();
-  // In-flight webhook work. Cloud Run must run with CPU always allocated so this
-  // keeps running after the 200 goes out. Tests and the simulator await drain().
-  const pending = new Set<Promise<void>>();
-  const track = (p: Promise<void>) => {
-    pending.add(p);
-    p.finally(() => pending.delete(p));
-  };
+  // Messages are handled by the worker after the 200 goes out. Cloud Run must run
+  // with CPU always allocated so it keeps running. Tests and the simulator call drain().
+  const worker = createWorker(baseDeps, workerOpts);
+  const deps: Deps = { ...baseDeps, kick: worker.kick };
 
   app.get("/healthz", (c) => c.text("ok"));
 
@@ -36,9 +34,13 @@ export function createApp(deps: Deps) {
     } catch {
       return c.text("bad json", 400);
     }
-    track(
-      processPayload(deps, body).catch((e) => log.error("processPayload crashed", errFields(e))),
-    );
+    try {
+      if (await enqueuePayload(deps, body)) worker.kick();
+    } catch (e) {
+      // Not saved: a non-2xx makes Meta redeliver.
+      log.error("enqueue failed", errFields(e));
+      return c.text("try again", 500);
+    }
     return c.text("ok");
   });
 
@@ -48,8 +50,5 @@ export function createApp(deps: Deps) {
     return c.json(result);
   });
 
-  const drain = async () => {
-    while (pending.size) await Promise.all([...pending]);
-  };
-  return { app, drain };
+  return { app, drain: worker.drain, worker };
 }

@@ -10,4 +10,11 @@ export type Ctx = {
   llm: Llm;
   cfg: Config;
   now: () => Date;
+  /**
+   * Idempotency keys for queued replies: `<prefix>:<n>`. The worker sets the
+   * prefix to the inbound wamid, so a retried handler can't queue a reply twice.
+   */
+  out?: { prefix: string; n: number };
+  /** Wake the worker after queueing work. */
+  kick?: () => void;
 };

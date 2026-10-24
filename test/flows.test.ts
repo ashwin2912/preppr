@@ -244,6 +244,7 @@ describe("cutoff", () => {
     const before = h.wa.sent.length;
     const r1 = await runCutoff({ db: h.db, wa: h.wa, llm: h.llm, cfg: h.cfg, now: () => h.clock.now });
     expect(r1).toMatchObject({ closed: 1, summaries: [{ sent: true }] });
+    await h.drain();
     const summary = h.texts(h.wa.sent.slice(before));
     expect(summary).toContain("2 × Dal Makhani");
     expect(summary).toContain("5 × Roti");
@@ -256,6 +257,7 @@ describe("cutoff", () => {
     const n = h.wa.sent.length;
     const r2 = await runCutoff({ db: h.db, wa: h.wa, llm: h.llm, cfg: h.cfg, now: () => h.clock.now });
     expect(r2).toMatchObject({ closed: 0, summaries: [] });
+    await h.drain();
     expect(h.wa.sent.length).toBe(n);
   });
 
@@ -275,10 +277,13 @@ describe("24-hour window guard", () => {
     await h.onboard(ALICE, "Alice");
     const ctx = { db: h.db, wa: h.wa, llm: h.llm, cfg: h.cfg, now: () => h.clock.now };
     expect(await send(ctx, { kind: "text", to: ALICE, body: "hi" })).toBe(true);
+    await h.drain();
+    expect(h.wa.sent.at(-1)).toMatchObject({ to: ALICE, body: "hi" });
     h.advance(24 * HOUR + 1000);
     const n = h.wa.sent.length;
     expect(await send(ctx, { kind: "text", to: ALICE, body: "hi" })).toBe(false);
     expect(await send(ctx, { kind: "text", to: CHARU, body: "never messaged us" })).toBe(false);
+    await h.drain();
     expect(h.wa.sent.length).toBe(n);
   });
 

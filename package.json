@@ -17,7 +17,6 @@
     "simulate": "tsx scripts/simulate.ts"
   },
   "author": "",
-  "license": "UNLICENSED",
   "packageManager": "pnpm@10.19.0",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
@@ -42,7 +41,6 @@
     "vitest": "^5.0.5"
   },
   "type": "module",
-  "private": true,
   "engines": {
     "node": ">=20"
   }

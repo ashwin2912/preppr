@@ -11,6 +11,7 @@ import {
   timestamp,
   unique,
 } from "drizzle-orm/pg-core";
+import type { InboundMessage, Outbound } from "../wa/types";
 
 export type MenuItem = {
   id: string;
@@ -94,6 +95,55 @@ export const conversationState = pgTable("conversation_state", {
   updatedAt: ts("updated_at").notNull().defaultNow(),
 });
 
+/** Status + retry bookkeeping shared by the inbox and outbox queues. */
+const queueColumns = () => ({
+  status: text("status", { enum: ["pending", "processing", "done", "failed"] }).notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: ts("next_attempt_at").notNull().defaultNow(),
+  /** Lease while processing; an expired lease means the worker died and the row is claimable again. */
+  lockedUntil: ts("locked_until"),
+  lastError: text("last_error"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+});
+
+/** Every inbound WhatsApp message, saved before the webhook returns 200. */
+export const inbox = pgTable(
+  "inbox",
+  {
+    id: serial("id").primaryKey(),
+    waMessageId: text("wa_message_id").notNull().unique(),
+    phone: text("phone").notNull(),
+    payload: jsonb("payload_json").$type<InboundMessage>().notNull(),
+    ...queueColumns(),
+  },
+  (t) => [index("inbox_status_next").on(t.status, t.nextAttemptAt), index("inbox_phone_created").on(t.phone, t.createdAt)],
+);
+
+/** Every outbound WhatsApp message, sent by the worker with retries. */
+export const outbox = pgTable(
+  "outbox",
+  {
+    id: serial("id").primaryKey(),
+    /** `<inbound wamid>:<n>` etc., so a retried handler can't queue the same reply twice. */
+    idemKey: text("idem_key").notNull().unique(),
+    to: text("to").notNull(),
+    payload: jsonb("payload_json").$type<Outbound>().notNull(),
+    ...queueColumns(),
+    waMessageId: text("wa_message_id"),
+    sentAt: ts("sent_at"),
+  },
+  (t) => [index("outbox_status_next").on(t.status, t.nextAttemptAt), index("outbox_to_created").on(t.to, t.createdAt)],
+);
+
+/** Small shared key/value store: sync markers, alert dedupe. */
+export const kv = pgTable("kv", {
+  key: text("key").primaryKey(),
+  value: jsonb("value_json").notNull(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
 export type Customer = typeof customers.$inferSelect;
 export type Menu = typeof menus.$inferSelect;
 export type Order = typeof orders.$inferSelect;
+export type InboxRow = typeof inbox.$inferSelect;
+export type OutboxRow = typeof outbox.$inferSelect;
