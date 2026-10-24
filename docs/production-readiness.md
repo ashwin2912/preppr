@@ -60,7 +60,7 @@ flowchart LR
     OUT --> S["Sender with retries"] --> M
 ```
 
-### 9. Claude fallback
+### 9. Claude fallback (done)
 
 **Problem:** if the Claude API is down or slow, every order fails with "didn't catch that".
 
@@ -144,7 +144,7 @@ The rule parser must be strict: it only accepts a message when every part of it 
 
 ### Recommendation
 
-1. Build the code-first parser and try thinking off. This likely brings model cost down to a few dollars a month, and it also delivers item 9.
+1. ~~Build the code-first parser~~ (done: `src/llm/rules.ts`). Try thinking off. This likely brings model cost down to a few dollars a month, and it also delivers item 9.
 2. Add a comparison mode to the parser evaluation (same fixtures, several models, accuracy and cost side by side).
 3. Switch providers only if another model matches Claude's accuracy on the owner's real messages.
 

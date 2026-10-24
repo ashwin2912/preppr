@@ -87,12 +87,12 @@ describe("customer ordering", () => {
     const h = await harness();
     await h.publishMenu();
     await h.onboard(ALICE, "Alice");
-    const first = await h.say(ALICE, "2 dal", "wamid.dup");
-    const second = await h.say(ALICE, "2 dal", "wamid.dup");
+    const first = await h.say(ALICE, "2 dal (no onion)", "wamid.dup");
+    const second = await h.say(ALICE, "2 dal (no onion)", "wamid.dup");
     expect(first.length).toBeGreaterThan(0);
     expect(second).toHaveLength(0);
     expect(await h.db.select().from(orders)).toHaveLength(1);
-    expect(h.llm.calls.filter((c) => c.message === "2 dal")).toHaveLength(1);
+    expect(h.llm.calls.filter((c) => c.message === "2 dal (no onion)")).toHaveLength(1);
   });
 
   it("edits re-require confirmation and old confirm buttons are rejected", async () => {

@@ -9,7 +9,9 @@ import { InboundMessageSchema, WebhookPayloadSchema, type Incoming, type Inbound
 import { handleCustomer, sendMenu } from "./customer";
 import { handleOnboarding, needsOnboarding } from "./onboarding";
 import { handleOwner } from "./owner";
+import { forwardToOwner } from "./handoff";
 import { getState, tagIntent } from "./state";
+import { ParserUnavailable } from "../llm/types";
 import { currentMenu, ordersOpen } from "../domain/menu";
 
 export type Deps = Omit<Ctx, "db"> & { db: DB };
@@ -111,8 +113,15 @@ export async function handleInbound(deps: Deps, row: InboxRow) {
 }
 
 /** Called once an inbox row has used up its retries. */
-export async function inboundFailed(deps: Deps, row: InboxRow) {
+export async function inboundFailed(deps: Deps, row: InboxRow, error?: unknown) {
   const ctx: Ctx = { ...deps, out: { prefix: `${row.waMessageId}:failed`, n: 0 } };
+  if (error instanceof ParserUnavailable) {
+    // The model is down: a person reads it instead of the customer retyping into the void.
+    const [c] = await deps.db.select().from(customers).where(eq(customers.phone, row.phone));
+    await forwardToOwner(ctx, c ?? null, toIncoming(row.payload, row.phone), "Bot couldn't read this (parser down), please reply by hand");
+    await sendText(ctx, row.phone, "Sorry, I'm having trouble reading messages right now. I've passed yours to the kitchen and they'll reply shortly 🙏");
+    return;
+  }
   await sendText(ctx, row.phone, "Sorry, something went wrong on our side. Please try again in a minute 🙏");
 }
 

@@ -111,6 +111,27 @@ describe("durable inbox", () => {
     expect(h.wa.sent.at(-1)).toMatchObject({ to: ALICE, body: expect.stringContaining("something went wrong") });
   });
 
+  it("keeps simple orders working when the model is down, and hands the rest to the owner", async () => {
+    const h = await harness();
+    await h.publishMenu();
+    await h.onboard(ALICE, "Alice");
+    h.llm.interpret = async () => {
+      throw new Error("Claude API 529 overloaded");
+    };
+    expect(h.texts(await h.say(ALICE, "2 dal, 3 roti"))).toContain("Total: $15.00"); // rules, no model
+
+    await h.post(h.payload(ALICE, "add 1 paneer please", "wamid.needs-model"));
+    for (const wait of [0, 5_000, 30_000]) {
+      h.advance(wait);
+      await h.drain();
+    }
+    const [r] = await h.db.select().from(inbox).where(eq(inbox.waMessageId, "wamid.needs-model"));
+    expect(r).toMatchObject({ status: "failed", attempts: 3 });
+    const last = h.wa.sent.slice(-2);
+    expect(last.find((m) => m.to === OWNER)!.body).toMatch(/parser down[\s\S]*add 1 paneer please/);
+    expect(last.find((m) => m.to === ALICE)!.body).toContain("passed yours to the kitchen");
+  });
+
   it("reclaims a row whose worker died mid-handling (expired lease)", async () => {
     const h = await harness();
     await h.publishMenu();

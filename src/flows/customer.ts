@@ -3,9 +3,10 @@ import { menus, orders, type Customer, type Menu, type Order, type OrderLine } f
 import type { Ctx } from "../ctx";
 import { currentMenu, formatMenuForCustomer, ordersOpen } from "../domain/menu";
 import { formatLines, money, orderTotal, priceLines, remapLines, toSimple } from "../domain/order";
-import { errFields, log } from "../lib/log";
+import { log } from "../lib/log";
 import { formatClock, formatDay, localDate } from "../lib/time";
-import type { InterpretInput, Interpretation } from "../llm/types";
+import { ruleInterpret } from "../llm/rules";
+import { ParserUnavailable, type InterpretInput, type Interpretation } from "../llm/types";
 import { send, sendText } from "../wa/send";
 import { MEDIA_TYPES, type Incoming } from "../wa/types";
 import { balance } from "../domain/ledger";
@@ -190,16 +191,19 @@ export async function handleCustomer(ctx: Ctx, msg: Incoming, customer: Customer
       : null,
   };
 
-  let it: Interpretation;
-  try {
-    it = await ctx.llm.interpret(input);
-  } catch (e) {
-    log.error("interpret failed", { phone, ...errFields(e) });
-    await sendText(ctx, phone, "Sorry, I didn't catch that — could you type it again? 🙏");
-    return;
+  // Simple messages are read in code; only the rest costs a model call.
+  let it = ruleInterpret(input);
+  const source = it ? "rules" : "model";
+  if (!it) {
+    try {
+      it = await ctx.llm.interpret(input);
+    } catch (e) {
+      // The worker retries; if the model stays down the owner gets the message (inboundFailed).
+      throw new ParserUnavailable(e);
+    }
   }
   await tagIntent(ctx, msg.id, it.intent);
-  log.info("interpreted", { phone, intent: it.intent, confidence: it.confidence, lines: it.lines.length, unmatched: it.unmatched });
+  log.info("interpreted", { phone, source, intent: it.intent, confidence: it.confidence, lines: it.lines.length, unmatched: it.unmatched });
 
   if (it.intent === "handoff") return handoff(ctx, customer, msg, "Asked for a person");
   // Payments come in any time, including after cutoff and delivery.

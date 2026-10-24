@@ -57,3 +57,11 @@ export interface Llm {
   parseMenu(text: string): Promise<ParsedMenu>;
   interpret(input: InterpretInput): Promise<Interpretation>;
 }
+
+/** The model call failed (down, timeout, unparsable output). */
+export class ParserUnavailable extends Error {
+  constructor(readonly cause: unknown) {
+    super(`parser unavailable: ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = "ParserUnavailable";
+  }
+}

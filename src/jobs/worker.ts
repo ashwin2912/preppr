@@ -68,7 +68,7 @@ export function createWorker(deps: Deps, opts: WorkerOptions = {}) {
       }
       log.error("inbound dead-lettered", { alert: "inbound_dead", id: row.waMessageId, phone: row.phone, attempts: row.attempts, ...errFields(e) });
       await d.db.update(inbox).set({ status: "failed", lockedUntil: null, lastError: errText(e) }).where(eq(inbox.id, row.id));
-      await inboundFailed(d, row).catch((e2) => log.error("failure notice not queued", errFields(e2)));
+      await inboundFailed(d, row, e).catch((e2) => log.error("failure notice not queued", errFields(e2)));
     }
   }
 
