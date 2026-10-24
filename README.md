@@ -5,12 +5,13 @@ WhatsApp ordering assistant for small kitchens. Customers order in plain chat ("
 Built for a home-style tiffin service doing ~500 orders a day on the official WhatsApp Cloud API. Node 20 + TypeScript, Hono, Postgres (Drizzle), and an LLM for reading messy order text; prices and totals are always computed in code.
 
 - **Ordering in chat:** onboarding (name, area, address), free-text orders in English/Hindi/Hinglish, edits, cancel, "same as yesterday", Confirm/Change buttons.
-- **Owner commands over WhatsApp:** `MENU` to publish the day's menu, `SUMMARY`, `ORDERS`, `CLOSE`, `OPEN`, `RESUME`.
+- **Owner commands over WhatsApp:** `MENU` to publish the day's menu, `SUMMARY`, `ORDERS`, `CLOSE`, `OPEN`, `RESUME`, plus payment commands.
+- **Payments and balances:** customers report payments in chat ("paid $20 zelle"); the owner verifies with one tap. One ledger covers pay-per-order and prepaid customers.
 - **Cutoff summary:** kitchen totals per item, deliveries by area, unconfirmed drafts, anything that needs a human.
 - **Safe by default:** webhook signature check, idempotent message handling, per-customer locking, replies only inside WhatsApp's free 24-hour window.
 - **Any model:** Claude by default; any OpenAI-compatible API (OpenRouter, Hugging Face, Ollama) for testing.
 
-Roadmap: thermal-printed route sheets, customer and balance tracking (daily payers and prepaid plans), sales history, and prep forecasting.
+Roadmap: thermal-printed route sheets, sales history, and prep forecasting.
 
 ## How it works
 
@@ -27,6 +28,8 @@ The bot never starts a conversation. It only replies inside the 24-hour customer
 5. At cutoff, Cloud Scheduler hits `/jobs/cutoff`: the menu closes and the owner gets kitchen totals, a delivery list grouped by area, unconfirmed drafts, and anything flagged.
 
 Owner commands: `MENU …`, `SUMMARY`, `ORDERS`, `CLOSE`, `OPEN [11:30]`, `RESUME <number>`, `HELP`.
+
+Payments: customers can just say "paid $20 on zelle". The bot records it as **to verify**, thanks them, and sends the owner **Verify ✅ / Reject ❌** buttons. Balance = confirmed orders − verified payments (negative = prepaid credit), shown on order confirmation when something is due. Owner commands: `PENDING`, `VERIFY <#>`, `REJECT <#>`, `PAID <number> <amount> [cash|zelle|venmo|card]` (recorded as verified), `BALANCE <number>`, `DUES`, `BLOCK <number>`, `UNBLOCK <number>`.
 
 Customers who still reply to the owner's business number out of habit are handled by the owner by hand (a quick reply pointing them to the link). The bot has no involvement there.
 
@@ -67,7 +70,7 @@ AREAS="Journal Square,Newport,Heights" DATABASE_URL=... pnpm import:customers cu
 AREAS="Journal Square,Newport,Heights" DATABASE_URL=... pnpm import:customers customers.csv
 ```
 
-CSV header: `phone,name,area,address_note`. Phones are normalized to E.164 (US default). Areas must match `AREAS` (case-insensitive); unknown areas are reported and left empty, so the bot asks for them. Blank cells never overwrite existing values. A customer with a name and an area skips onboarding.
+CSV header: `phone,name,area,address_note` (optional extra column `notes`). Phones are normalized to E.164 (US default). Areas must match `AREAS` (case-insensitive); unknown areas are reported and left empty, so the bot asks for them. Blank cells never overwrite existing values. A customer with a name and an area skips onboarding.
 
 ## Docs
 
@@ -118,6 +121,9 @@ src/flows/owner.ts      owner commands, menu publish
 src/flows/customer.ts   ordering, edits, cancel, questions, confirm buttons
 src/flows/onboarding.ts name → area → address note
 src/flows/handoff.ts    owner notification + bot pause
+src/flows/payments.ts   reported payments, verify/reject, PAID/BALANCE/DUES/BLOCK
+src/domain/ledger.ts    balances (confirmed orders − verified payments)
+src/jobs/worker.ts      inbox/outbox worker (src/jobs/queue.ts: claiming)
 src/jobs/cutoff.ts      close menus, send summary once
 src/domain/*            menu/order/summary formatting and math, CSV import
 src/llm/anthropic.ts    Claude prompts (structured outputs)

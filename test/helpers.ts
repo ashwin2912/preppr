@@ -53,10 +53,25 @@ export class FakeLlm implements Llm {
   async interpret(input: InterpretInput): Promise<Interpretation> {
     this.calls.push(input);
     const msg = input.message.toLowerCase().trim();
-    const base = { lines: [], unmatched: [], confidence: 1, question_topic: null, clarify_question: null };
+    const base = {
+      lines: [],
+      unmatched: [],
+      confidence: 1,
+      question_topic: null,
+      clarify_question: null,
+      payment_cents: null,
+      payment_method: null,
+    };
     const o = this.overrides.get(msg);
     if (o) return o;
     if (/aunty|owner|human/.test(msg)) return { ...base, intent: "handoff" };
+    if (/\b(paid|sent|payment)\b/.test(msg) || (input.clarification?.question.includes("How much did you send") && /^\$?\d+(\.\d{1,2})?\s*(zelle|venmo|cash|card)?$/.test(msg))) {
+      const amt = msg.match(/\$?(\d+(?:\.\d{1,2})?)/);
+      const method = msg.match(/\b(zelle|venmo|cash|card)\b/)?.[1] as Interpretation["payment_method"] | undefined;
+      if (amt || /\b(paid|sent|payment)\b/.test(msg))
+        return { ...base, intent: "payment", payment_cents: amt ? Math.round(Number(amt[1]) * 100) : null, payment_method: method ?? null };
+    }
+    if (/how much do i owe|my balance/.test(msg)) return { ...base, intent: "question", question_topic: "balance" };
     if (/^(hi|hello|order|menu)$/.test(msg)) return { ...base, intent: "menu" };
     if (/cancel/.test(msg)) return { ...base, intent: "cancel" };
     if (/cutoff|last time/.test(msg)) return { ...base, intent: "question", question_topic: "cutoff" };

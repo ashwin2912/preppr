@@ -38,7 +38,43 @@ export const customers = pgTable("customers", {
   createdAt: ts("created_at").notNull().defaultNow(),
   lastInboundAt: ts("last_inbound_at"),
   humanTakeoverUntil: ts("human_takeover_until"),
+  /** blocked: bot ignores them silently. */
+  status: text("status", { enum: ["active", "blocked"] }).notNull().default("active"),
+  /** Owner's free-text notes ("leave at side door"). */
+  notes: text("notes"),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
 });
+
+export const PAYMENT_METHODS = ["zelle", "venmo", "cash", "card", "other"] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+/**
+ * Payment ledger. Balance owed = confirmed order totals − verified payments
+ * (negative = prepaid credit). Customer-reported payments start as pending
+ * until the owner verifies them.
+ */
+export const payments = pgTable(
+  "payments",
+  {
+    id: serial("id").primaryKey(),
+    customerPhone: text("customer_phone")
+      .notNull()
+      .references(() => customers.phone),
+    amountCents: integer("amount_cents").notNull(),
+    method: text("method", { enum: PAYMENT_METHODS }).notNull(),
+    status: text("status", { enum: ["pending", "verified", "rejected"] }).notNull().default("pending"),
+    source: text("source", { enum: ["customer", "owner"] }).notNull(),
+    /** The customer's message that reported it, if any. */
+    messageId: text("message_id").unique(),
+    note: text("note"),
+    createdAt: ts("created_at").notNull().defaultNow(),
+    verifiedAt: ts("verified_at"),
+    /** Owner number that verified or rejected it. */
+    verifiedBy: text("verified_by"),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("payments_customer").on(t.customerPhone), index("payments_status").on(t.status)],
+);
 
 export const menus = pgTable("menus", {
   id: serial("id").primaryKey(),
@@ -145,5 +181,6 @@ export const kv = pgTable("kv", {
 export type Customer = typeof customers.$inferSelect;
 export type Menu = typeof menus.$inferSelect;
 export type Order = typeof orders.$inferSelect;
+export type Payment = typeof payments.$inferSelect;
 export type InboxRow = typeof inbox.$inferSelect;
 export type OutboxRow = typeof outbox.$inferSelect;

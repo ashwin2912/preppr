@@ -8,7 +8,8 @@ export type StateName =
   | "onboarding_area"
   | "onboarding_address"
   | "awaiting_confirm"
-  | "awaiting_clarification";
+  | "awaiting_clarification"
+  | "awaiting_payment_details";
 
 export type ConvState = { state: StateName; context: Record<string, unknown> };
 

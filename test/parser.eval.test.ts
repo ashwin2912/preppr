@@ -18,6 +18,8 @@ type Expect = {
   unclear?: boolean;
   topic?: string;
   topicIn?: (string | null)[];
+  paymentCents?: number | null;
+  paymentMethod?: string | null;
 };
 type Case = {
   message: string;
@@ -44,6 +46,8 @@ describe.skipIf(!picked)(`order parser (${picked?.label ?? "no model"})`, () => 
     if (e.intentIn) expect(e.intentIn).toContain(it.intent);
     if (e.topic) expect(it.question_topic).toBe(e.topic);
     if (e.topicIn) expect(e.topicIn).toContain(it.question_topic);
+    if (e.paymentCents !== undefined) expect(it.payment_cents).toBe(e.paymentCents);
+    if (e.paymentMethod !== undefined) expect(it.payment_method).toBe(e.paymentMethod);
 
     const { lines, problems } = priceLines(it.lines, fixtures.menu);
     const accepted = lines.length > 0 && !it.unmatched.length && !problems.length && it.confidence >= CONFIDENCE_MIN;

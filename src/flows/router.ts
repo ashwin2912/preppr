@@ -123,6 +123,11 @@ async function route(ctx: Ctx, msg: Incoming) {
   await ctx.db.update(customers).set({ lastInboundAt: now }).where(eq(customers.phone, msg.phone));
   let [customer] = await ctx.db.select().from(customers).where(eq(customers.phone, msg.phone));
 
+  if (customer?.status === "blocked") {
+    await ctx.db.update(messages).set({ intent: "blocked" }).where(eq(messages.waMessageId, msg.id));
+    return;
+  }
+
   if (customer?.humanTakeoverUntil && customer.humanTakeoverUntil > now) {
     log.info("takeover active, bot silent", { phone: msg.phone });
     await ctx.db.update(messages).set({ intent: "takeover_silent" }).where(eq(messages.waMessageId, msg.id));

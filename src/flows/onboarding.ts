@@ -41,11 +41,12 @@ async function askArea(ctx: Ctx, phone: string, context: Record<string, unknown>
  */
 export async function handleOnboarding(ctx: Ctx, msg: Incoming, customer: Customer | null, st: ConvState): Promise<boolean> {
   const phone = msg.phone;
-  const update = (set: Partial<Customer>) => ctx.db.update(customers).set(set).where(eq(customers.phone, phone));
+  const update = (set: Partial<Customer>) =>
+    ctx.db.update(customers).set({ ...set, updatedAt: ctx.now() }).where(eq(customers.phone, phone));
 
   if (!st.state.startsWith("onboarding_")) {
     const isNew = !customer;
-    if (isNew) await ctx.db.insert(customers).values({ phone, createdAt: ctx.now(), lastInboundAt: ctx.now() }).onConflictDoNothing();
+    if (isNew) await ctx.db.insert(customers).values({ phone, createdAt: ctx.now(), updatedAt: ctx.now(), lastInboundAt: ctx.now() }).onConflictDoNothing();
     // Only brand-new customers are asked for an address note; imported ones fill gaps only.
     const context = { askAddress: isNew };
     if (!customer?.name) {

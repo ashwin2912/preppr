@@ -17,7 +17,7 @@ export const ParsedMenuSchema = z.object({
 });
 export type ParsedMenu = z.infer<typeof ParsedMenuSchema>;
 
-export const INTENTS = ["order", "edit", "cancel", "question", "handoff", "menu", "other"] as const;
+export const INTENTS = ["order", "edit", "cancel", "question", "handoff", "menu", "payment", "other"] as const;
 export type Intent = (typeof INTENTS)[number];
 
 export const InterpretationSchema = z.object({
@@ -33,8 +33,10 @@ export const InterpretationSchema = z.object({
     .describe("For order/edit: the COMPLETE resulting order, not just the changes"),
   unmatched: z.array(z.string()).describe("Requested things that are not on today's menu or are ambiguous"),
   confidence: z.number().describe("0 to 1"),
-  question_topic: z.enum(["cutoff", "menu", "price", "other"]).nullable(),
+  question_topic: z.enum(["cutoff", "menu", "price", "balance", "other"]).nullable(),
   clarify_question: z.string().nullable().describe("One short question to ask if unsure, else null"),
+  payment_cents: z.number().int().nullable().describe("For payment: amount the customer says they sent, in US cents; null if not stated"),
+  payment_method: z.enum(["zelle", "venmo", "cash", "card", "other"]).nullable().describe("For payment: how they paid; null if not stated"),
 });
 export type Interpretation = z.infer<typeof InterpretationSchema>;
 

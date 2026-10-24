@@ -20,6 +20,7 @@ Intents:
 - question: asks something (cutoff time, what's on the menu, prices, delivery, anything else).
 - handoff: wants a human ("talk to aunty", "call me", "owner please"), complains, or has a problem with a past delivery or payment.
 - menu: greeting or asks to see the menu / start ordering ("hi", "Order", "what's today").
+- payment: tells us they have paid or sent money ("paid $20 on zelle", "sent 45 venmo", "30 bhej diya", "done payment"). A complaint about a payment (charged twice, wrong amount) is handoff, not payment.
 - other: anything else (thanks, ok, emoji).
 
 Rules for order/edit:
@@ -31,7 +32,9 @@ Rules for order/edit:
 - confidence: how sure you are that lines exactly capture what the customer wants (1 = certain).
 - If confidence is below 0.8 or unmatched is not empty, write clarify_question: one short, friendly question that resolves it (mention what IS available when relevant). Otherwise null.
 
-question_topic: for question intent only: cutoff, menu, price, or other. Null for other intents.`;
+question_topic: for question intent only: cutoff, menu, price, balance (how much they owe / their account balance), or other. Null for other intents.
+
+payment_cents / payment_method: for payment intent only. Amount in integer US cents ("$20" -> 2000, "45.50" -> 4550); null if no amount is stated. Method zelle, venmo, cash, card, or other; null if not stated. Never guess either. Null for other intents.`;
 
 function lineStr(l: { item_id: string; name: string; qty: number; note: string | null }) {
   return `${l.qty} x ${l.name} [${l.item_id}]${l.note ? ` (note: ${l.note})` : ""}`;

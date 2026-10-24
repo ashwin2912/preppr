@@ -39,6 +39,12 @@
     { "message": "thank you 🙏", "expect": { "intent": "other" } },
     { "message": "1 dal", "expect": { "intent": "order", "items": { "i1": 1 } } },
     { "message": "dal", "expect": { "intent": "order", "items": { "i1": 1 } } },
-    { "message": "2 rice 2 roti and a sweet", "expect": { "intent": "order", "items": { "i2": 2, "i3": 2, "i5": 1 } } }
+    { "message": "2 rice 2 roti and a sweet", "expect": { "intent": "order", "items": { "i2": 2, "i3": 2, "i5": 1 } } },
+    { "message": "paid $20 on zelle", "expect": { "intent": "payment", "paymentCents": 2000, "paymentMethod": "zelle" } },
+    { "message": "sent 45 venmo aunty", "expect": { "intent": "payment", "paymentCents": 4500, "paymentMethod": "venmo" } },
+    { "message": "30 dollar zelle kar diya", "expect": { "intent": "payment", "paymentCents": 3000, "paymentMethod": "zelle" } },
+    { "message": "payment done", "expect": { "intent": "payment", "paymentCents": null } },
+    { "message": "I sent 12.50 for this week", "expect": { "intent": "payment", "paymentCents": 1250, "paymentMethod": null } },
+    { "message": "how much do I owe?", "expect": { "intent": "question", "topic": "balance" } }
   ]
 }

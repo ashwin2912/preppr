@@ -13,14 +13,14 @@ export type ImportReport = {
   duplicates: string[];
 };
 
-type Row = { phone: string; name: string | null; area: string | null; addressNote: string | null };
+type Row = { phone: string; name: string | null; area: string | null; addressNote: string | null; notes: string | null };
 
 const blank = (s: string | undefined) => {
   const t = s?.trim();
   return t ? t : null;
 };
 
-/** Parse + validate a customers CSV (phone,name,area,address_note). Pure. */
+/** Parse + validate a customers CSV (phone,name,area,address_note[,notes]). Pure. */
 export function parseCustomersCsv(csv: string, areas: string[]) {
   const records = parse(csv, { columns: (h: string[]) => h.map((x) => x.trim().toLowerCase()), skip_empty_lines: true, trim: true, bom: true }) as Record<string, string>[];
   const report: ImportReport = { inserted: 0, updated: 0, badPhones: [], areaMismatches: [], duplicates: [] };
@@ -36,7 +36,7 @@ export function parseCustomersCsv(csv: string, areas: string[]) {
     const area = rawArea ? matchArea(rawArea, areas) : null;
     if (rawArea && !area) report.areaMismatches.push({ row: line, phone, area: rawArea });
     if (rows.has(phone)) report.duplicates.push(phone);
-    rows.set(phone, { phone, name: blank(r.name), area, addressNote: blank(r.address_note) });
+    rows.set(phone, { phone, name: blank(r.name), area, addressNote: blank(r.address_note), notes: blank(r.notes) });
   });
   return { rows: [...rows.values()], report };
 }
@@ -51,7 +51,7 @@ export async function importCustomers(db: Q, rows: Row[], report: ImportReport, 
   for (const r of rows) {
     const cur = existing.get(r.phone);
     if (!cur) {
-      await db.insert(customers).values({ ...r, createdAt: now });
+      await db.insert(customers).values({ ...r, createdAt: now, updatedAt: now });
       report.inserted++;
       continue;
     }
@@ -59,9 +59,10 @@ export async function importCustomers(db: Q, rows: Row[], report: ImportReport, 
       name: r.name ?? cur.name,
       area: r.area ?? cur.area,
       addressNote: r.addressNote ?? cur.addressNote,
+      notes: r.notes ?? cur.notes,
     };
-    if (set.name !== cur.name || set.area !== cur.area || set.addressNote !== cur.addressNote) {
-      await db.update(customers).set(set).where(inArray(customers.phone, [r.phone]));
+    if (set.name !== cur.name || set.area !== cur.area || set.addressNote !== cur.addressNote || set.notes !== cur.notes) {
+      await db.update(customers).set({ ...set, updatedAt: now }).where(inArray(customers.phone, [r.phone]));
       report.updated++;
     }
   }

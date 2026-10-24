@@ -8,7 +8,9 @@ import { formatClock, formatDay, localDate } from "../lib/time";
 import type { InterpretInput, Interpretation } from "../llm/types";
 import { send, sendText } from "../wa/send";
 import { MEDIA_TYPES, type Incoming } from "../wa/types";
+import { balance } from "../domain/ledger";
 import { forwardToOwner, handoff } from "./handoff";
+import { answerBalance, balanceText, handlePaymentReport } from "./payments";
 import { type ConvState, clearState, setState, tagIntent } from "./state";
 
 export const CONFIDENCE_MIN = 0.8;
@@ -126,16 +128,20 @@ async function handleButton(ctx: Ctx, msg: Incoming, customer: Customer, replyId
   }
   await ctx.db.update(orders).set({ status: "confirmed", updatedAt: ctx.now() }).where(eq(orders.id, o.id));
   await clearState(ctx, customer.phone);
+  const b = await balance(ctx.db, customer.phone);
   await sendText(
     ctx,
     customer.phone,
-    `You're in! ✅ Delivery to ${customer.area ?? "you"} ${dayPhrase(menu, ctx)}.\nTo change or cancel, just message me before ${formatClock(menu.cutoffAt, ctx.cfg.tz)}.`,
+    `You're in! ✅ Delivery to ${customer.area ?? "you"} ${dayPhrase(menu, ctx)}.\nTo change or cancel, just message me before ${formatClock(menu.cutoffAt, ctx.cfg.tz)}.` +
+      (b.owedCents > 0 ? `\n\n${balanceText(b)}` : ""),
   );
 }
 
 async function answerQuestion(ctx: Ctx, msg: Incoming, customer: Customer, menu: Menu | null, it: Interpretation) {
   const topic = it.question_topic ?? "other";
-  if (menu && topic === "cutoff") {
+  if (topic === "balance") {
+    await answerBalance(ctx, customer);
+  } else if (menu && topic === "cutoff") {
     await sendText(ctx, customer.phone, `Orders close at ${formatClock(menu.cutoffAt, ctx.cfg.tz)} ${dayPhrase(menu, ctx)}.`);
   } else if (menu && (topic === "menu" || topic === "price")) {
     await sendMenu(ctx, customer.phone, menu);
@@ -172,13 +178,14 @@ export async function handleCustomer(ctx: Ctx, msg: Incoming, customer: Customer
   const current = open ? await findOrder(ctx, menu.id, phone) : null;
   const prev = open ? await previousOrder(ctx, phone, menu) : null;
   const clarifying = st.state === "awaiting_clarification";
+  const payClarifying = st.state === "awaiting_payment_details";
 
   const input: InterpretInput = {
     message: text,
     menu: open ? menu.items : [],
     currentOrder: current && current.status !== "cancelled" ? toSimple(current.lines) : null,
     previousOrder: prev && open ? remapLines(prev.lines, menu.items) : null,
-    clarification: clarifying
+    clarification: clarifying || payClarifying
       ? { previousMessage: String(st.context.previousMessage ?? ""), question: String(st.context.question ?? "") }
       : null,
   };
@@ -195,6 +202,9 @@ export async function handleCustomer(ctx: Ctx, msg: Incoming, customer: Customer
   log.info("interpreted", { phone, intent: it.intent, confidence: it.confidence, lines: it.lines.length, unmatched: it.unmatched });
 
   if (it.intent === "handoff") return handoff(ctx, customer, msg, "Asked for a person");
+  // Payments come in any time, including after cutoff and delivery.
+  if (it.intent === "payment" || (payClarifying && it.payment_cents)) return handlePaymentReport(ctx, msg, customer, it, st);
+  if (payClarifying) await clearState(ctx, phone); // they moved on to something else
 
   if (!open) {
     if (it.intent === "question") return answerQuestion(ctx, msg, customer, null, it);

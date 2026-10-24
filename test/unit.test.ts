@@ -137,9 +137,9 @@ not-a-phone,Nobody,Newport,
   it("normalizes phones, matches areas, reports problems", () => {
     const { rows, report } = parseCustomersCsv(csv, cfg.areas);
     expect(rows).toEqual([
-      { phone: "+12015550001", name: "Alice K", area: null, addressNote: null },
-      { phone: "+12015550002", name: "Bob", area: null, addressNote: null },
-      { phone: "+12015550003", name: null, area: "Heights", addressNote: "Blue door" },
+      { phone: "+12015550001", name: "Alice K", area: null, addressNote: null, notes: null },
+      { phone: "+12015550002", name: "Bob", area: null, addressNote: null, notes: null },
+      { phone: "+12015550003", name: null, area: "Heights", addressNote: "Blue door", notes: null },
     ]);
     expect(report.badPhones).toEqual([{ row: 4, phone: "not-a-phone" }]);
     expect(report.areaMismatches).toEqual([{ row: 3, phone: "+12015550002", area: "Hoboken" }]);
@@ -178,6 +178,8 @@ describe("OpenAI-compatible parser", () => {
       unmatched: [],
       confidence: 0.95,
       question_topic: null,
+      payment_cents: null,
+      payment_method: null,
       clarify_question: null,
     });
   });

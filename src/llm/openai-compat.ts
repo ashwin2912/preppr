@@ -125,6 +125,8 @@ function fillInterpretation(raw: unknown): unknown {
     unmatched: [],
     question_topic: null,
     clarify_question: null,
+    payment_cents: null,
+    payment_method: null,
     ...raw,
     confidence: num(raw.confidence),
     lines: lines.map((l) => (isObj(l) ? { note: null, ...l, item_id: String(l.item_id), qty: num(l.qty) } : l)),

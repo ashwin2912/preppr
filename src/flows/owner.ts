@@ -8,6 +8,7 @@ import { normalizePhone } from "../lib/phone";
 import { formatClock, formatDay, localDate, parseClock, zonedInstant } from "../lib/time";
 import { send, sendLongText, sendText } from "../wa/send";
 import type { Incoming } from "../wa/types";
+import { cmdBalance, cmdBlock, cmdDues, cmdPaid, cmdPending, settlePayment } from "./payments";
 import { tagIntent } from "./state";
 
 export const HELP = `*Owner commands*
@@ -17,6 +18,14 @@ ORDERS — quick list of orders so far
 CLOSE — stop taking orders now and send the summary
 OPEN [time] — reopen ordering until time (default: 30 min from now)
 RESUME <number> — turn the bot back on for a customer
+
+*Payments*
+PENDING — payments customers reported, waiting for you
+VERIFY <#> / REJECT <#> — confirm or reject a reported payment
+PAID <number> <amount> [cash|zelle|venmo|card] — record a payment yourself
+BALANCE <number> — what a customer owes
+DUES — everyone who owes money
+BLOCK <number> / UNBLOCK <number> — make the bot ignore a customer
 HELP — this list`;
 
 const OPEN_DEFAULT_MS = 30 * 60 * 1000;
@@ -136,6 +145,7 @@ export async function handleOwner(ctx: Ctx, msg: Incoming) {
     await tagIntent(ctx, msg.id, `owner_${kind}`);
     if (kind === "menu_publish") return publish(ctx, phone, Number(id));
     if (kind === "menu_edit") return sendText(ctx, phone, "Send the corrected menu as a new MENU message.");
+    if (kind === "pay_ok" || kind === "pay_no") return settlePayment(ctx, phone, Number(id), kind === "pay_ok");
     return;
   }
   const text = msg.text.trim();
@@ -166,6 +176,20 @@ export async function handleOwner(ctx: Ctx, msg: Incoming) {
       return cmdOpen(ctx, phone, arg);
     case "RESUME":
       return cmdResume(ctx, phone, arg);
+    case "PAID":
+      return cmdPaid(ctx, phone, arg);
+    case "VERIFY":
+    case "REJECT":
+      return settlePayment(ctx, phone, Number(arg.replace(/^#/, "")), cmd === "VERIFY");
+    case "PENDING":
+      return cmdPending(ctx, phone);
+    case "BALANCE":
+      return cmdBalance(ctx, phone, arg);
+    case "DUES":
+      return cmdDues(ctx, phone);
+    case "BLOCK":
+    case "UNBLOCK":
+      return cmdBlock(ctx, phone, arg, cmd === "BLOCK");
     default:
       await sendText(ctx, phone, HELP);
   }
