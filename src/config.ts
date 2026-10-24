@@ -27,6 +27,10 @@ const EnvSchema = z.object({
   PAYMENT_INSTRUCTIONS: z.string().default(""),
   KITCHEN_NAME: z.string().default("Tiffin Kitchen"),
   JOB_SECRET: z.string().min(1),
+  MENU_EXPECTED_BY: z.string().regex(/^\d{1,2}:\d{2}$/).default("09:00"),
+  KITCHEN_DAYS: z.string().default("Mon,Tue,Wed,Thu,Fri,Sat"),
+  SENTRY_DSN: z.string().optional(),
+  SENTRY_ENVIRONMENT: z.string().default("production"),
   GOOGLE_SERVICE_ACCOUNT_JSON: z.string().optional(),
   SHEET_ID: z.string().optional(),
 });
@@ -50,6 +54,12 @@ export type Config = {
   paymentInstructions: string;
   kitchenName: string;
   jobSecret: string;
+  /** Alert if no menu is published by this local time on a kitchen day. */
+  menuExpectedBy: string;
+  /** "Mon".."Sun" */
+  kitchenDays: string[];
+  sentryDsn?: string;
+  sentryEnvironment: string;
   /** Both set = Google Sheet sync on. */
   googleServiceAccountJson?: string;
   sheetId?: string;
@@ -64,6 +74,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   });
   const bot = normalizePhone(e.BOT_NUMBER);
   if (!bot) throw new Error(`Invalid BOT_NUMBER: ${e.BOT_NUMBER}`);
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const kitchenDays = csv(e.KITCHEN_DAYS).map((d) => {
+    const day = DAYS.find((x) => x.toLowerCase() === d.slice(0, 3).toLowerCase());
+    if (!day) throw new Error(`Invalid KITCHEN_DAYS entry: ${d}`);
+    return day;
+  });
   const areas = csv(e.AREAS);
   if (areas.length === 0) throw new Error("AREAS must list at least one area");
   return {
@@ -83,6 +99,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     paymentInstructions: e.PAYMENT_INSTRUCTIONS,
     kitchenName: e.KITCHEN_NAME,
     jobSecret: e.JOB_SECRET,
+    menuExpectedBy: e.MENU_EXPECTED_BY,
+    kitchenDays,
+    sentryDsn: e.SENTRY_DSN || undefined,
+    sentryEnvironment: e.SENTRY_ENVIRONMENT,
     googleServiceAccountJson: e.GOOGLE_SERVICE_ACCOUNT_JSON || undefined,
     sheetId: e.SHEET_ID || undefined,
   };

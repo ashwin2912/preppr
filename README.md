@@ -76,6 +76,7 @@ CSV header: `phone,name,area,address_note` (optional extra column `notes`). Phon
 ## Docs
 
 - [docs/meta-setup.md](docs/meta-setup.md): WhatsApp Cloud API setup, step by step. Start business verification early; it takes days.
+- [docs/monitoring.md](docs/monitoring.md): Sentry and UptimeRobot setup, what each alert means, runbook.
 - [docs/google-sheet-setup.md](docs/google-sheet-setup.md): Google Sheet export of orders, customers and payments.
 - [docs/production-readiness.md](docs/production-readiness.md): what's left before launch, reliability work, parsing cost options.
 - [system-design.md](system-design.md): architecture and flow diagrams, running on a laptop.
@@ -86,7 +87,7 @@ CSV header: `phone,name,area,address_note` (optional extra column `notes`). Phon
 gcloud run deploy preppr --source . --region us-east4 \
   --no-cpu-throttling --min-instances 1 --max-instances 2 \
   --set-env-vars TZ=America/New_York,AREAS="Journal Square,Newport,Heights",... \
-  --set-secrets WA_TOKEN=wa-token:latest,WA_APP_SECRET=wa-app-secret:latest,ANTHROPIC_API_KEY=anthropic-key:latest,DATABASE_URL=database-url:latest,JOB_SECRET=job-secret:latest
+  --set-secrets WA_TOKEN=wa-token:latest,WA_APP_SECRET=wa-app-secret:latest,ANTHROPIC_API_KEY=anthropic-key:latest,DATABASE_URL=database-url:latest,JOB_SECRET=job-secret:latest,SENTRY_DSN=sentry-dsn:latest,GOOGLE_SERVICE_ACCOUNT_JSON=sheets-key:latest
 ```
 
 `--no-cpu-throttling` is required. The webhook returns 200 immediately and keeps working afterwards; with default throttling Cloud Run starves that work of CPU. `--min-instances 1` avoids cold starts.
@@ -117,7 +118,7 @@ If the owner hasn't messaged the bot in 24 h (normally the morning `MENU` covers
 ## Layout
 
 ```
-src/app.ts              routes: /webhook, /jobs/cutoff, /healthz
+src/app.ts              routes: /webhook, /jobs/cutoff, /healthz, /readyz
 src/flows/router.ts     dedupe, lock, owner vs customer, takeover, onboarding
 src/flows/owner.ts      owner commands, menu publish
 src/flows/customer.ts   ordering, edits, cancel, questions, confirm buttons
@@ -126,6 +127,7 @@ src/flows/handoff.ts    owner notification + bot pause
 src/flows/payments.ts   reported payments, verify/reject, PAID/BALANCE/DUES/BLOCK
 src/domain/ledger.ts    balances (confirmed orders − verified payments)
 src/jobs/worker.ts      inbox/outbox worker (src/jobs/queue.ts: claiming)
+src/jobs/watchdog.ts    alerts: no menu, late summary, stuck queue, unverified payments
 src/jobs/sheetSync.ts   DB → Google Sheet (src/sheets/client.ts: REST + service account)
 src/jobs/cutoff.ts      close menus, send summary once
 src/domain/*            menu/order/summary formatting and math, CSV import

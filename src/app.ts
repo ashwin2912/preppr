@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { enqueuePayload, type Deps } from "./flows/router";
 import { runCutoff } from "./jobs/cutoff";
+import { sql } from "drizzle-orm";
+import { backlog } from "./jobs/watchdog";
 import { createWorker, type WorkerOptions } from "./jobs/worker";
 import { errFields, log } from "./lib/log";
 import { secretEquals, verifySignature } from "./wa/signature";
@@ -13,6 +15,19 @@ export function createApp(baseDeps: Deps, workerOpts?: WorkerOptions) {
   const deps: Deps = { ...baseDeps, kick: worker.kick };
 
   app.get("/healthz", (c) => c.text("ok"));
+
+  // For UptimeRobot: database reachable and the worker keeping up.
+  app.get("/readyz", async (c) => {
+    try {
+      await deps.db.execute(sql`select 1`);
+      const b = await backlog(deps.db, deps.now());
+      const ok = b.inbox === 0 && b.outbox === 0;
+      return c.json({ ok, db: "ok", backlog: b }, ok ? 200 : 503);
+    } catch (e) {
+      log.error("readyz failed", errFields(e));
+      return c.json({ ok: false, db: "error" }, 503);
+    }
+  });
 
   app.get("/webhook", (c) => {
     const mode = c.req.query("hub.mode");

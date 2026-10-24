@@ -5,12 +5,14 @@ import { errFields, log } from "../lib/log";
 import { WaSendError } from "../wa/client";
 import { claimInbox, claimOutbox } from "./queue";
 import { sheetSyncer } from "./sheetSync";
+import { runWatchdog } from "./watchdog";
 
 /** Delay before attempt n+1, indexed by attempts so far. Past the end: give up. */
 export const INBOX_BACKOFF_MS = [5_000, 30_000];
 export const OUTBOX_BACKOFF_MS = [2_000, 5_000, 15_000, 60_000, 180_000];
 
 export const SHEET_SYNC_MS = 30_000;
+export const WATCHDOG_MS = 60_000;
 
 export type WorkerOptions = { concurrency?: number; pollMs?: number };
 
@@ -38,6 +40,7 @@ export function createWorker(deps: Deps, opts: WorkerOptions = {}) {
     wake?.();
   };
   const d: Deps = { ...deps, kick };
+  periodic.push({ name: "watchdog", everyMs: WATCHDOG_MS, run: async () => void (await runWatchdog(d)), last: 0 });
   if (d.sheets) periodic.push({ name: "sheet_sync", everyMs: SHEET_SYNC_MS, run: sheetSyncer(d), last: 0 });
 
   async function runPeriodic() {
@@ -63,7 +66,7 @@ export function createWorker(deps: Deps, opts: WorkerOptions = {}) {
           .where(eq(inbox.id, row.id));
         return;
       }
-      log.error("inbound dead-lettered", { id: row.waMessageId, phone: row.phone, attempts: row.attempts, ...errFields(e) });
+      log.error("inbound dead-lettered", { alert: "inbound_dead", id: row.waMessageId, phone: row.phone, attempts: row.attempts, ...errFields(e) });
       await d.db.update(inbox).set({ status: "failed", lockedUntil: null, lastError: errText(e) }).where(eq(inbox.id, row.id));
       await inboundFailed(d, row).catch((e2) => log.error("failure notice not queued", errFields(e2)));
     }
@@ -84,7 +87,7 @@ export function createWorker(deps: Deps, opts: WorkerOptions = {}) {
           .set({ status: "pending", lockedUntil: null, lastError: errText(e), nextAttemptAt: new Date(d.now().getTime() + delay) })
           .where(eq(outbox.id, row.id));
       } else {
-        log.error("send dead-lettered", { to: row.to, key: row.idemKey, attempts: row.attempts, retryable, ...errFields(e) });
+        log.error("send dead-lettered", { alert: "send_dead", to: row.to, key: row.idemKey, attempts: row.attempts, retryable, ...errFields(e) });
         await d.db.update(outbox).set({ status: "failed", lockedUntil: null, lastError: errText(e) }).where(eq(outbox.id, row.id));
       }
       return;

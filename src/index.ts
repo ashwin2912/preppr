@@ -5,11 +5,14 @@ import { connectPglite, connectPostgres } from "./db/client";
 import { log } from "./lib/log";
 import { loadDotEnv } from "./lib/env";
 import { llmFromEnv } from "./llm";
+import { flushSentry, initSentry } from "./lib/sentry";
 import { GoogleSheetSink } from "./sheets/client";
 import { DryRunWaClient, GraphWaClient } from "./wa/client";
 
 loadDotEnv();
 const cfg = loadConfig();
+if (cfg.sentryDsn) initSentry(cfg.sentryDsn, cfg.sentryEnvironment);
+else log.warn("SENTRY_DSN not set: errors are only logged");
 const db = cfg.databaseUrl ? await connectPostgres(cfg.databaseUrl) : await connectPglite();
 if (!cfg.databaseUrl) log.warn("DATABASE_URL not set: using in-memory PGlite, data is lost on restart");
 
@@ -33,6 +36,7 @@ const shutdown = async (signal: string) => {
   log.info("shutting down", { signal });
   server.close();
   await worker.stop();
+  await flushSentry();
   process.exit(0);
 };
 process.on("SIGTERM", () => void shutdown("SIGTERM"));

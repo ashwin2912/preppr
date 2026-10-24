@@ -2,7 +2,7 @@
 
 What's left before the bot can take real orders reliably, and how to keep the parsing cost down.
 
-Status as of 2026-10-17: the MVP code is complete and passes its test suite (39 tests) and the simulated full day (`pnpm simulate`). It has **not** yet run against real WhatsApp, the real Claude model, or a real deployment.
+Status as of 2026-10-23: durable inbox/outbox, payments, Google Sheet export and monitoring are built and tested (77 tests, simulated full day). Tried with a few test WhatsApp users; not yet deployed with a permanent database, and the parser has not been evaluated on real customer messages.
 
 ---
 
@@ -66,12 +66,12 @@ flowchart LR
 
 **Fix:** a deterministic parser in code (section 6) handles simple orders on its own. When the model is unavailable, anything the code parser can't handle goes to the owner as a handoff instead of failing.
 
-### 10. Monitoring and alerts
+### 10. Monitoring and alerts (done, see [monitoring.md](./monitoring.md))
 
-- [ ] Uptime monitor (e.g. UptimeRobot, free) on `https://<host>/healthz`, alerting the owner and developer by SMS.
-- [ ] Alert on `ERROR` logs, `send failed`, and `window_closed` for owner numbers (Cloud Logging alert policy on Cloud Run, or Sentry).
-- [ ] Alert when the cutoff summary hasn't been delivered by 30 minutes after cutoff.
-- [ ] A morning "bot is alive" check: the owner's `MENU` reply already confirms it end to end. If no MENU has arrived by 9 AM, alert.
+- [x] `/readyz` (database + queue backlog) for UptimeRobot. Create the monitor once deployed.
+- [x] Every `ERROR` log goes to Sentry when `SENTRY_DSN` is set. Create the project and alert rules.
+- [x] Alert when the cutoff summary hasn't been delivered by 30 minutes after cutoff (`summary_late`).
+- [x] Alert if no menu is published by `MENU_EXPECTED_BY` on a kitchen day (`no_menu`).
 
 ### 11. Abuse protection (done)
 
@@ -87,7 +87,7 @@ Simulate ~50 customers messaging within 1–2 minutes of the broadcast against a
 
 - [ ] **Pilot:** one area, 20–30 customers, for one week. The owner keeps accepting manual orders as a backup. Compare the cutoff summary to what the owner would have written by hand.
 - [ ] **Fallback plan:** if the bot is down during the window, the owner sends a broadcast: "Bot is down — reply to this number with your order today." Write this message in advance.
-- [ ] **Runbook:** where the logs are, how to restart, how to run `SUMMARY` by hand, how to `RESUME` a customer, and who to call.
+- [x] **Runbook:** in [monitoring.md](./monitoring.md#runbook). Add who to call.
 - [ ] **Secrets:** `WA_TOKEN`, `WA_APP_SECRET`, `ANTHROPIC_API_KEY`, `DATABASE_URL`, `JOB_SECRET` live in Secret Manager (Cloud Run) or in a `.env` on an encrypted disk (laptop). They are never committed.
 
 ---
