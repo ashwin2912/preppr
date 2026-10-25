@@ -30,7 +30,7 @@ The bot never starts a conversation. It only replies inside the 24-hour customer
 
 Owner commands: `MENU …`, `SUMMARY`, `ORDERS`, `CLOSE`, `OPEN [11:30]`, `RESUME <number>`, `HELP`.
 
-Customers: `ADD <number> [name]` adds a regular, and `NAME` / `AREA` / `NOTE <number> <value>` fill in details. Known customers without a name get their WhatsApp profile name automatically. Customers without an area are listed under "No area" until the owner sets one.
+Customers: the owner can share contact cards with the bot (📎 → Contact) to add regulars in bulk. `ADD <number> [name]` adds one, and `NAME` / `AREA` / `NOTE <number> <value>` fill in details. Known customers without a name get their WhatsApp profile name automatically. Customers without an area are listed under "No area" until the owner sets one.
 
 Payments: customers can just say "paid $20 on zelle". The bot records it as **to verify**, thanks them, and sends the owner **Verify ✅ / Reject ❌** buttons. Balance = confirmed orders − verified payments (negative = prepaid credit), shown on order confirmation when something is due. Owner commands: `PENDING`, `VERIFY <#>`, `REJECT <#>`, `PAID <number> <amount> [cash|zelle|venmo|card]` (recorded as verified), `BALANCE <number>`, `DUES`, `BLOCK <number>`, `UNBLOCK <number>`.
 
@@ -80,6 +80,12 @@ DATABASE_URL=... pnpm import:customers contacts.vcf
 
 Every number on a card is imported under the card's name. Importing contacts who never order is harmless; it only matters if they message the bot.
 
+Past chats from the owner's own number (WhatsApp → Export chat → Without media) can be read too, e.g. to collect real messages for `test/fixtures/orders.json`:
+
+```sh
+pnpm import:chat-export ./exports --fixtures draft-cases.json   # anonymized customer messages to label
+```
+
 Or use a CSV with areas and delivery notes:
 
 ```sh
@@ -91,6 +97,7 @@ CSV header: `phone,name,area,address_note` (optional extra column `notes`). Phon
 ## Docs
 
 - [docs/meta-setup.md](docs/meta-setup.md): WhatsApp Cloud API setup, step by step. Start business verification early; it takes days.
+- [docs/owner-setup.md](docs/owner-setup.md): for the owner: adding regulars, redirecting old chats, `CHATS`, exporting past chats.
 - [docs/monitoring.md](docs/monitoring.md): Sentry and UptimeRobot setup, what each alert means, runbook.
 - [docs/google-sheet-setup.md](docs/google-sheet-setup.md): Google Sheet export of orders, customers and payments.
 - [docs/production-readiness.md](docs/production-readiness.md): what's left before launch, reliability work, parsing cost options.
@@ -140,6 +147,7 @@ src/flows/owner.ts      owner commands, menu publish
 src/flows/customer.ts   ordering, edits, cancel, questions, confirm buttons
 src/flows/onboarding.ts name → area → address note
 src/flows/handoff.ts    owner notification + bot pause
+src/admin/*             chat viewer: CHATS link (auth.ts), conversation list + transcripts
 src/flows/payments.ts   reported payments, verify/reject, PAID/BALANCE/DUES/BLOCK
 src/domain/ledger.ts    balances (confirmed orders − verified payments)
 src/jobs/worker.ts      inbox/outbox worker (src/jobs/queue.ts: claiming)

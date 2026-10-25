@@ -1,5 +1,5 @@
 import { and, desc, eq, lt } from "drizzle-orm";
-import { menus, orders, type Customer, type Menu, type Order, type OrderLine } from "../db/schema";
+import { menus, messages, orders, type Customer, type Menu, type Order, type OrderLine } from "../db/schema";
 import type { Ctx } from "../ctx";
 import { currentMenu, formatMenuForCustomer, ordersOpen } from "../domain/menu";
 import { formatLines, money, orderTotal, priceLines, remapLines, toSimple } from "../domain/order";
@@ -203,7 +203,7 @@ export async function handleCustomer(ctx: Ctx, msg: Incoming, customer: Customer
       throw new ParserUnavailable(e);
     }
   }
-  await tagIntent(ctx, msg.id, it.intent);
+  await ctx.db.update(messages).set({ intent: it.intent, parser: source }).where(eq(messages.waMessageId, msg.id));
   log.info("interpreted", { phone, source, intent: it.intent, confidence: it.confidence, lines: it.lines.length, unmatched: it.unmatched });
 
   if (it.intent === "handoff") return handoff(ctx, customer, msg, "Asked for a person");

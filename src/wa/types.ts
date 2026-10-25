@@ -16,6 +16,15 @@ export const InboundMessageSchema = z.looseObject({
     })
     .optional(),
   button: z.looseObject({ payload: z.string().optional(), text: z.string().optional() }).optional(),
+  /** Contact cards shared in the chat (type "contacts"). */
+  contacts: z
+    .array(
+      z.looseObject({
+        name: z.looseObject({ formatted_name: z.string().optional(), first_name: z.string().optional(), last_name: z.string().optional() }).optional(),
+        phones: z.array(z.looseObject({ phone: z.string().optional(), wa_id: z.string().optional() })).optional(),
+      }),
+    )
+    .optional(),
 });
 export type InboundMessage = z.infer<typeof InboundMessageSchema>;
 
@@ -65,4 +74,4 @@ export type Incoming = {
   raw: unknown;
 };
 
-export const MEDIA_TYPES = new Set(["audio", "voice", "image", "video", "document", "sticker"]);
+export const MEDIA_TYPES = new Set(["audio", "voice", "image", "video", "document", "sticker", "contacts", "location"]);

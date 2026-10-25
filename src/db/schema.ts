@@ -119,6 +119,8 @@ export const messages = pgTable(
     body: text("body"),
     raw: jsonb("raw_json"),
     intent: text("intent"),
+    /** Who read an inbound customer message: the code rules or the model. */
+    parser: text("parser", { enum: ["rules", "model"] }),
     createdAt: ts("created_at").notNull().defaultNow(),
   },
   (t) => [index("messages_phone_dir_created").on(t.phone, t.direction, t.createdAt)],

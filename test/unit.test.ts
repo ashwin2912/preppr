@@ -215,3 +215,40 @@ describe("contacts (.vcf) import", () => {
     expect(report.badPhones).toEqual([{ row: 3, phone: "12" }]);
   });
 });
+
+describe("WhatsApp chat export", () => {
+  it("parses iOS and Android exports, multi-line messages, and skips system/media lines", async () => {
+    const { parseChatExport } = await import("../src/domain/chatExport");
+    const ios = [
+      "[10/20/26, 8:01:12 AM] Tiffin Kitchen: ‎Messages and calls are end-to-end encrypted.",
+      "[10/20/26, 8:14:02 AM] Priya: 2 dal",
+      "3 roti",
+      "[10/20/26, 8:15:00 AM] Priya: ‎image omitted",
+      "[10/20/26, 8:16:00 AM] Tiffin Kitchen: Done ✅",
+    ].join("\r\n");
+    expect(parseChatExport(ios)).toEqual([
+      { at: "10/20/26, 8:01:12 AM", author: "Tiffin Kitchen", text: "Messages and calls are end-to-end encrypted." },
+      { at: "10/20/26, 8:14:02 AM", author: "Priya", text: "2 dal\n3 roti" },
+      { at: "10/20/26, 8:16:00 AM", author: "Tiffin Kitchen", text: "Done ✅" },
+    ]);
+    const android = [
+      "20/10/2026, 08:00 - Messages and calls are end-to-end encrypted. Tap to learn more.",
+      "20/10/2026, 08:14 - Rahul Kumar: aaj ka menu?",
+      "20/10/2026, 08:15 - Rahul Kumar: <Media omitted>",
+      "10/21/26, 9:02 AM - Rahul Kumar: same as kal",
+    ].join("\n");
+    expect(parseChatExport(android).map((m) => [m.author, m.text])).toEqual([
+      ["Rahul Kumar", "aaj ka menu?"],
+      ["Rahul Kumar", "same as kal"],
+    ]);
+  });
+
+  it("guesses the kitchen account and masks personal details", async () => {
+    const { anonymize, guessOwner } = await import("../src/domain/chatExport");
+    const k = (a: string) => ({ at: "", author: a, text: "x" });
+    expect(guessOwner([[k("Kitchen"), k("Priya")], [k("Kitchen"), k("Rahul")]])).toBe("Kitchen");
+    expect(anonymize("Hi it's Priya Shah, call me on (201) 555-0101 or p@x.com", ["Priya Shah"])).toBe(
+      "Hi it's <name> <name>, call me on <phone> or <email>",
+    );
+  });
+});

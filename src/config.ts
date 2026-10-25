@@ -31,6 +31,8 @@ const EnvSchema = z.object({
   KITCHEN_DAYS: z.string().default("Mon,Tue,Wed,Thu,Fri,Sat"),
   SENTRY_DSN: z.string().optional(),
   SENTRY_ENVIRONMENT: z.string().default("production"),
+  PUBLIC_URL: z.string().url().optional(),
+  ADMIN_SECRET: z.string().optional(),
   GOOGLE_SERVICE_ACCOUNT_JSON: z.string().optional(),
   SHEET_ID: z.string().optional(),
 });
@@ -60,6 +62,10 @@ export type Config = {
   kitchenDays: string[];
   sentryDsn?: string;
   sentryEnvironment: string;
+  /** Public base URL of this service, for links the bot sends (chat viewer). */
+  publicUrl?: string;
+  /** Signs chat-viewer links; unset = viewer off. */
+  adminSecret?: string;
   /** Both set = Google Sheet sync on. */
   googleServiceAccountJson?: string;
   sheetId?: string;
@@ -103,6 +109,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     kitchenDays,
     sentryDsn: e.SENTRY_DSN || undefined,
     sentryEnvironment: e.SENTRY_ENVIRONMENT,
+    publicUrl: e.PUBLIC_URL?.replace(/\/+$/, "") || undefined,
+    adminSecret: e.ADMIN_SECRET || undefined,
     googleServiceAccountJson: e.GOOGLE_SERVICE_ACCOUNT_JSON || undefined,
     sheetId: e.SHEET_ID || undefined,
   };

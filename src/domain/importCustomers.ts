@@ -4,6 +4,7 @@ import type { Q } from "../db/client";
 import { customers } from "../db/schema";
 import { normalizePhone } from "../lib/phone";
 import { matchArea } from "../flows/onboarding";
+import type { InboundMessage } from "../wa/types";
 
 export type ImportReport = {
   inserted: number;
@@ -80,6 +81,30 @@ export function parseContactsVcf(vcf: string) {
       }
     }
   }
+  return { rows: [...rows.values()], report };
+}
+
+type SharedContact = NonNullable<InboundMessage["contacts"]>[number];
+
+/** Contact cards the owner shared in WhatsApp → rows (same rules as a .vcf). */
+export function parseSharedContacts(contacts: SharedContact[]) {
+  const report: ImportReport = { inserted: 0, updated: 0, badPhones: [], areaMismatches: [], duplicates: [] };
+  const rows = new Map<string, Row>();
+  contacts.forEach((c, i) => {
+    const n = c.name;
+    const name = (n?.formatted_name || [n?.first_name, n?.last_name].filter(Boolean).join(" ")).trim().slice(0, 60) || null;
+    for (const p of c.phones ?? []) {
+      // wa_id is set when the number is on WhatsApp; it's digits only.
+      const raw = p.wa_id ? `+${p.wa_id}` : (p.phone ?? "");
+      const phone = normalizePhone(raw);
+      if (!phone) {
+        report.badPhones.push({ row: i + 1, phone: raw });
+        continue;
+      }
+      if (rows.has(phone)) report.duplicates.push(phone);
+      rows.set(phone, { phone, name, area: null, addressNote: null, notes: null });
+    }
+  });
   return { rows: [...rows.values()], report };
 }
 

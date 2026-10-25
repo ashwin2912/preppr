@@ -36,6 +36,15 @@ Message bodies (`body`, `raw`, `text` fields) are not sent to Sentry. Phone numb
 
 `/readyz` returns `{"ok":true,"db":"ok","backlog":{"inbox":0,"outbox":0}}`, or 503 when the database is unreachable or messages are piling up.
 
+## Checking conversations
+
+The owner (or anyone on `OWNER_NUMBERS`) sends `CHATS` to the bot and gets a private link valid for 12 hours. It needs `PUBLIC_URL` and `ADMIN_SECRET` set. `CHATS <number>` opens one customer.
+
+- `/admin`: everyone who messaged that day (‹ › for other days), with their order status and flags. **Needs a look** filters to: asked for the owner, reply not delivered, bot error, rate-limited, blocked, bot paused. "Read by AI" marks messages the code parser didn't handle; worth skimming in the pilot.
+- `/admin/c/<number>`: the transcript, with delivery status on every reply (⏳ sending, ✓ sent, ✓✓ delivered, read, ⚠ not delivered with WhatsApp's reason), plus the customer's details, recent orders, balance and payments.
+
+The link becomes a cookie scoped to `/admin`, so it isn't left in the address bar. Changing `ADMIN_SECRET` signs everyone out. Removing a number from `OWNER_NUMBERS` stops their links working.
+
 ## Runbook
 
 **Bot not replying**

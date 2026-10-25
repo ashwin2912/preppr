@@ -7,7 +7,9 @@ import { errFields, log } from "../lib/log";
 import { normalizePhone } from "../lib/phone";
 import { formatClock, formatDay, localDate, parseClock, zonedInstant } from "../lib/time";
 import { send, sendLongText, sendText } from "../wa/send";
-import type { Incoming } from "../wa/types";
+import { InboundMessageSchema, type Incoming } from "../wa/types";
+import { importCustomers, parseSharedContacts } from "../domain/importCustomers";
+import { signViewerToken } from "../admin/auth";
 import { cmdAdd, cmdSetField } from "./customerAdmin";
 import { cmdBalance, cmdBlock, cmdDues, cmdPaid, cmdPending, settlePayment } from "./payments";
 import { tagIntent } from "./state";
@@ -22,6 +24,7 @@ RESUME <number> — turn the bot back on for a customer
 
 *Customers*
 ADD <number> [name] — add a regular; they skip the sign-up questions
+(Or share contacts with me: 📎 → Contact → pick people → Send)
 NAME / AREA / NOTE <number> <value> — fill in name, delivery area, delivery note
 
 *Payments*
@@ -31,6 +34,7 @@ PAID <number> <amount> [cash|zelle|venmo|card] — record a payment yourself
 BALANCE <number> — what a customer owes
 DUES — everyone who owes money
 BLOCK <number> / UNBLOCK <number> — make the bot ignore a customer
+CHATS [number] — private link to read the bot's conversations (works 12 h)
 HELP — this list`;
 
 const OPEN_DEFAULT_MS = 30 * 60 * 1000;
@@ -143,6 +147,30 @@ async function cmdResume(ctx: Ctx, phone: string, arg: string) {
   await sendText(ctx, phone, `Bot is back on for ${res[0]!.name ?? target}.`);
 }
 
+async function cmdChats(ctx: Ctx, phone: string, arg: string) {
+  const { publicUrl, adminSecret } = ctx.cfg;
+  if (!publicUrl || !adminSecret) return sendText(ctx, phone, "The chat viewer isn't set up yet (needs PUBLIC_URL and ADMIN_SECRET).");
+  const target = arg ? normalizePhone(arg) : null;
+  if (arg && !target) return sendText(ctx, phone, "Use CHATS, or CHATS +12015551234 for one customer.");
+  const params = new URLSearchParams({ t: signViewerToken(adminSecret, phone, ctx.now()) });
+  if (target) params.set("next", `/admin/c/${encodeURIComponent(target)}`);
+  await sendText(ctx, phone, `Bot conversations 👇 (private link, works for 12 hours — don't forward it)\n${publicUrl}/admin?${params}`);
+}
+
+/** Owner shared contact cards with the bot: they become known customers. */
+async function addSharedContacts(ctx: Ctx, phone: string, msg: Incoming) {
+  const parsed = InboundMessageSchema.safeParse(msg.raw);
+  const { rows, report } = parseSharedContacts(parsed.success ? (parsed.data.contacts ?? []) : []);
+  if (!rows.length) return sendText(ctx, phone, "I couldn't find any phone numbers in those contacts.");
+  await importCustomers(ctx.db, rows, report, ctx.now());
+  const parts = [`Added ${report.inserted} customer${report.inserted === 1 ? "" : "s"}`];
+  if (report.updated) parts.push(`updated ${report.updated}`);
+  const same = rows.length - report.inserted - report.updated;
+  if (same > 0) parts.push(`${same} already known`);
+  if (report.badPhones.length) parts.push(`${report.badPhones.length} number(s) unreadable`);
+  await sendText(ctx, phone, `${parts.join(", ")}. They can order straight away, no sign-up questions.`);
+}
+
 export async function handleOwner(ctx: Ctx, msg: Incoming) {
   const phone = msg.phone;
   if (msg.replyId) {
@@ -152,6 +180,10 @@ export async function handleOwner(ctx: Ctx, msg: Incoming) {
     if (kind === "menu_edit") return sendText(ctx, phone, "Send the corrected menu as a new MENU message.");
     if (kind === "pay_ok" || kind === "pay_no") return settlePayment(ctx, phone, Number(id), kind === "pay_ok");
     return;
+  }
+  if (msg.type === "contacts") {
+    await tagIntent(ctx, msg.id, "owner_contacts");
+    return addSharedContacts(ctx, phone, msg);
   }
   const text = msg.text.trim();
   const [word = ""] = text.split(/\s+/);
@@ -181,6 +213,9 @@ export async function handleOwner(ctx: Ctx, msg: Incoming) {
       return cmdOpen(ctx, phone, arg);
     case "RESUME":
       return cmdResume(ctx, phone, arg);
+    case "CHATS":
+    case "CHAT":
+      return cmdChats(ctx, phone, arg);
     case "ADD":
       return cmdAdd(ctx, phone, arg);
     case "NAME":

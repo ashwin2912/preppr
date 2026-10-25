@@ -4,6 +4,7 @@ import { runCutoff } from "./jobs/cutoff";
 import { sql } from "drizzle-orm";
 import { backlog } from "./jobs/watchdog";
 import { createWorker, type WorkerOptions } from "./jobs/worker";
+import { registerAdmin } from "./admin/routes";
 import { errFields, log } from "./lib/log";
 import { secretEquals, verifySignature } from "./wa/signature";
 
@@ -58,6 +59,8 @@ export function createApp(baseDeps: Deps, workerOpts?: WorkerOptions) {
     }
     return c.text("ok");
   });
+
+  registerAdmin(app, deps);
 
   app.post("/jobs/cutoff", async (c) => {
     if (!secretEquals(c.req.header("x-job-secret"), deps.cfg.jobSecret)) return c.text("forbidden", 403);

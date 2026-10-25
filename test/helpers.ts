@@ -22,6 +22,8 @@ export const testEnv = {
   PAYMENT_INSTRUCTIONS: "Pay by Zelle to 201-555-0100",
   KITCHEN_NAME: "Test Tiffin",
   JOB_SECRET: "job-secret",
+  PUBLIC_URL: "https://preppr.test",
+  ADMIN_SECRET: "admin-secret",
 };
 
 const NUMBER_WORDS: Record<string, number> = { one: 1, ek: 1, two: 2, do: 2, three: 3, teen: 3, four: 4, char: 4, five: 5 };
