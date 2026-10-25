@@ -62,7 +62,8 @@ async function sendOrderSummary(ctx: Ctx, customer: Customer, menu: Menu, o: Ord
   const body =
     (wasConfirmed ? "Updated your order — tap Confirm to lock in the change.\n\n" : "") +
     `*Your order — ${formatDay(menu.date, ctx.cfg.tz)}*\n\n${formatLines(o.lines)}\n\n` +
-    `*Total: ${money(o.totalCents)}*\nDelivery: ${customer.area ?? "—"}` +
+    `*Total: ${money(o.totalCents)}*` +
+    (customer.area ? `\nDelivery: ${customer.area}` : "") +
     (ctx.cfg.paymentInstructions ? `\n\n${ctx.cfg.paymentInstructions}` : "");
   await send(ctx, {
     kind: "buttons",

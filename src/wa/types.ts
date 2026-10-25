@@ -31,6 +31,10 @@ export const WebhookPayloadSchema = z.looseObject({
               value: z.looseObject({
                 messages: z.array(z.unknown()).optional(),
                 statuses: z.array(z.unknown()).optional(),
+                /** Sender's WhatsApp profile, one entry per sender in `messages`. */
+                contacts: z
+                  .array(z.looseObject({ wa_id: z.string().optional(), profile: z.looseObject({ name: z.string().optional() }).optional() }))
+                  .optional(),
               }),
             }),
           )

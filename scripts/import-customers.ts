@@ -1,29 +1,32 @@
 /**
- * Seed customers from a CSV with columns: phone,name,area,address_note
+ * Seed known customers. Known customers skip the bot's sign-up questions.
  *
- *   pnpm import:customers customers.csv [--dry-run]
+ *   pnpm import:customers contacts.vcf [--dry-run]    # the owner's phone contacts export
+ *   pnpm import:customers customers.csv [--dry-run]   # phone,name,area,address_note[,notes]
  *
- * Needs DATABASE_URL and AREAS. Imported customers with a name and a valid
- * area skip onboarding in the bot.
+ * Needs DATABASE_URL; a CSV also needs AREAS. Re-importing never blanks
+ * existing values, so it's safe to run again after the owner adds contacts.
  */
 import { readFileSync } from "node:fs";
 import { connectPostgres } from "../src/db/client";
-import { importCustomers, parseCustomersCsv } from "../src/domain/importCustomers";
+import { importCustomers, parseContactsVcf, parseCustomersCsv } from "../src/domain/importCustomers";
 
 const args = process.argv.slice(2);
 const file = args.find((a) => !a.startsWith("--"));
 const dryRun = args.includes("--dry-run");
 if (!file) {
-  console.error("Usage: pnpm import:customers <file.csv> [--dry-run]");
+  console.error("Usage: pnpm import:customers <contacts.vcf | customers.csv> [--dry-run]");
   process.exit(1);
 }
+const isVcf = /\.vcf$/i.test(file);
 const areas = (process.env.AREAS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-if (!areas.length) {
+if (!isVcf && !areas.length) {
   console.error("Set AREAS (e.g. AREAS='Journal Square,Newport,Heights')");
   process.exit(1);
 }
 
-const { rows, report } = parseCustomersCsv(readFileSync(file, "utf8"), areas);
+const text = readFileSync(file, "utf8");
+const { rows, report } = isVcf ? parseContactsVcf(text) : parseCustomersCsv(text, areas);
 console.log(`Parsed ${rows.length} customers from ${file}`);
 
 if (!dryRun) {
@@ -41,7 +44,7 @@ if (report.badPhones.length) {
   for (const b of report.badPhones) console.log(`  line ${b.row}: "${b.phone}"`);
 }
 if (report.areaMismatches.length) {
-  console.log(`\n${report.areaMismatches.length} rows with an area not in AREAS (left empty, bot will ask):`);
+  console.log(`\n${report.areaMismatches.length} rows with an area not in AREAS (left empty; set later with AREA):`);
   for (const a of report.areaMismatches) console.log(`  line ${a.row}: ${a.phone} "${a.area}"`);
 }
 if (report.duplicates.length) console.log(`\nDuplicate phones (last row wins): ${[...new Set(report.duplicates)].join(", ")}`);

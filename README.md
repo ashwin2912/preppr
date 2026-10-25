@@ -25,10 +25,12 @@ The bot never starts a conversation. It only replies inside the 24-hour customer
 1. Owner DMs the bot: `MENU Mon: Dal makhani 6, Jeera rice 4, Roti 1 each, Paneer bhurji 7. Cutoff 10:30`
 2. Bot replies with a preview + **Publish** / **Edit**. Publish opens ordering and sends back a ready-to-forward broadcast message with the `wa.me` link.
 3. Owner forwards that message to the broadcast lists from the business app.
-4. Customers tap the link → onboarding (name, area, address note) if new → menu → free-text order → itemized summary with total → **Confirm ✅** / **Change ✏️**.
+4. Customers tap the link and type their order ("2 dal, 3 roti") → itemized summary with total → **Confirm ✅** / **Change ✏️**. Known customers (imported from the owner's contacts, or added with `ADD`) are never asked anything. Only numbers the kitchen doesn't know get the short sign-up (name, area, delivery note) first.
 5. At cutoff, Cloud Scheduler hits `/jobs/cutoff`: the menu closes and the owner gets kitchen totals, a delivery list grouped by area, unconfirmed drafts, and anything flagged.
 
 Owner commands: `MENU …`, `SUMMARY`, `ORDERS`, `CLOSE`, `OPEN [11:30]`, `RESUME <number>`, `HELP`.
+
+Customers: `ADD <number> [name]` adds a regular, and `NAME` / `AREA` / `NOTE <number> <value>` fill in details. Known customers without a name get their WhatsApp profile name automatically. Customers without an area are listed under "No area" until the owner sets one.
 
 Payments: customers can just say "paid $20 on zelle". The bot records it as **to verify**, thanks them, and sends the owner **Verify ✅ / Reject ❌** buttons. Balance = confirmed orders − verified payments (negative = prepaid credit), shown on order confirmation when something is due. Owner commands: `PENDING`, `VERIFY <#>`, `REJECT <#>`, `PAID <number> <amount> [cash|zelle|venmo|card]` (recorded as verified), `BALANCE <number>`, `DUES`, `BLOCK <number>`, `UNBLOCK <number>`.
 
@@ -66,12 +68,25 @@ Schema changes: edit `src/db/schema.ts`, run `pnpm db:generate`, commit the new 
 
 ### Seeding customers
 
+Import the owner's existing customers so they skip the sign-up questions. Easiest is the owner's phone contacts:
+
+- **iPhone:** Contacts app → Lists → select all (or a "Tiffin" list) → Export → `.vcf`.
+- **Android / Google Contacts:** contacts.google.com → Export → vCard.
+
 ```sh
-AREAS="Journal Square,Newport,Heights" DATABASE_URL=... pnpm import:customers customers.csv --dry-run
+DATABASE_URL=... pnpm import:customers contacts.vcf --dry-run
+DATABASE_URL=... pnpm import:customers contacts.vcf
+```
+
+Every number on a card is imported under the card's name. Importing contacts who never order is harmless; it only matters if they message the bot.
+
+Or use a CSV with areas and delivery notes:
+
+```sh
 AREAS="Journal Square,Newport,Heights" DATABASE_URL=... pnpm import:customers customers.csv
 ```
 
-CSV header: `phone,name,area,address_note` (optional extra column `notes`). Phones are normalized to E.164 (US default). Areas must match `AREAS` (case-insensitive); unknown areas are reported and left empty, so the bot asks for them. Blank cells never overwrite existing values. A customer with a name and an area skips onboarding.
+CSV header: `phone,name,area,address_note` (optional extra column `notes`). Phones are normalized to E.164 (US default). Areas must match `AREAS` (case-insensitive); unknown areas are reported and left empty. Blank cells never overwrite existing values, so re-importing is safe.
 
 ## Docs
 

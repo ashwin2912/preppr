@@ -56,9 +56,10 @@ export async function enqueuePayload(deps: Deps, payload: unknown): Promise<numb
           continue;
         }
         const now = deps.now();
+        const profileName = change.value.contacts?.find((c) => c.wa_id === m.data.from)?.profile?.name?.trim().slice(0, 60) || null;
         const inserted = await deps.db
           .insert(inbox)
-          .values({ waMessageId: m.data.id, phone, payload: m.data, createdAt: now, nextAttemptAt: now })
+          .values({ waMessageId: m.data.id, phone, payload: m.data, profileName, createdAt: now, nextAttemptAt: now })
           .onConflictDoNothing()
           .returning({ id: inbox.id });
         if (inserted.length) queued++;
@@ -110,7 +111,7 @@ export async function handleInbound(deps: Deps, row: InboxRow) {
   }
 
   if (row.attempts === 1) void deps.wa.markReadTyping(msg.id);
-  await route(ctx, msg);
+  await route(ctx, msg, row.profileName);
 }
 
 /** Called once an inbox row has used up its retries. */
@@ -126,7 +127,7 @@ export async function inboundFailed(deps: Deps, row: InboxRow, error?: unknown) 
   await sendText(ctx, row.phone, "Sorry, something went wrong on our side. Please try again in a minute 🙏");
 }
 
-async function route(ctx: Ctx, msg: Incoming) {
+async function route(ctx: Ctx, msg: Incoming, profileName: string | null = null) {
   if (ctx.cfg.ownerNumbers.includes(msg.phone)) return handleOwner(ctx, msg);
 
   const now = ctx.now();
@@ -142,6 +143,15 @@ async function route(ctx: Ctx, msg: Incoming) {
     log.info("takeover active, bot silent", { phone: msg.phone });
     await ctx.db.update(messages).set({ intent: "takeover_silent" }).where(eq(messages.waMessageId, msg.id));
     return;
+  }
+
+  // Known customers imported without a name get their WhatsApp profile name.
+  if (customer && !customer.name && profileName) {
+    [customer] = await ctx.db
+      .update(customers)
+      .set({ name: profileName, updatedAt: now })
+      .where(eq(customers.phone, msg.phone))
+      .returning();
   }
 
   const st = await getState(ctx, msg.phone);

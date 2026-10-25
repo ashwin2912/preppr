@@ -46,7 +46,8 @@ export function formatBroadcast(m: Menu, cfg: Config) {
   return (
     `🍛 *${cfg.kitchenName} — ${formatDay(m.date, cfg.tz)}*\n\n${itemList(m.items)}\n\n` +
     `Order by ${formatClock(m.cutoffAt, cfg.tz)}.\n` +
-    `Tap to order 👉 ${waLink(`+${cfg.botNumber}`, "Order")}`
+    // No prefilled text: the customer already has the menu, so they open the chat and type their order.
+    `Tap 👉 ${waLink(`+${cfg.botNumber}`)} and type your order, e.g. *2 ${m.items[0]?.name.toLowerCase() ?? "dal"}, 3 roti*`
   );
 }
 

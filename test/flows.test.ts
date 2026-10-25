@@ -45,7 +45,7 @@ describe("owner menu flow", () => {
 
     const pub = await h.say(OWNER, { replyId: h.buttonsOf(preview)[0]!.id });
     const broadcast = pub.at(-1)!.body;
-    expect(broadcast).toContain(`https://wa.me/${BOT.slice(1)}?text=Order`);
+    expect(broadcast).toContain(`https://wa.me/${BOT.slice(1)} and type your order`);
     expect(broadcast).toContain("Order by 10:30 AM");
     expect((await h.db.select().from(menus))[0]!.status).toBe("active");
   });
@@ -173,15 +173,54 @@ describe("customer ordering", () => {
     expect(h.texts(out)).toContain("Dal Makhani");
   });
 
-  it("asks imported customers only for the missing area", async () => {
+  it("never asks known customers anything, even without a name or area", async () => {
     const h = await harness();
-    await h.db.insert(customers).values({ phone: BOB, name: "Bob" });
+    await h.db.insert(customers).values({ phone: BOB });
     await h.publishMenu();
-    const out = await h.say(BOB, "Order");
-    expect(h.buttonsOf(out).map((b) => b.title)).toContain("Heights");
-    const done = await h.say(BOB, "heights");
-    expect(h.texts(done)).toContain("You're all set");
-    expect((await h.db.select().from(customers))[0]!.area).toBe("Heights");
+    const out = await h.say(BOB, "2 dal, 3 roti"); // first ever message is the order
+    expect(h.texts(out)).not.toMatch(/What name|Which area/);
+    expect(h.texts(out)).toContain("Total: $15.00");
+  });
+
+  it("names a known customer from their WhatsApp profile", async () => {
+    const h = await harness();
+    await h.db.insert(customers).values({ phone: BOB });
+    await h.publishMenu();
+    const p = h.payload(BOB, "Order") as any;
+    p.entry[0].changes[0].value.contacts = [{ wa_id: BOB.slice(1), profile: { name: "Bobby D" } }];
+    await h.post(p);
+    await h.drain();
+    expect((await h.db.select().from(customers).where(eq(customers.phone, BOB)))[0]!.name).toBe("Bobby D");
+    // An owner-given name is never replaced.
+    await h.say(OWNER, `NAME ${BOB} Bob`);
+    const p2 = h.payload(BOB, "hi") as any;
+    p2.entry[0].changes[0].value.contacts = [{ wa_id: BOB.slice(1), profile: { name: "Bobby D" } }];
+    await h.post(p2);
+    await h.drain();
+    expect((await h.db.select().from(customers).where(eq(customers.phone, BOB)))[0]!.name).toBe("Bob");
+  });
+
+  it("still onboards numbers the kitchen doesn't know", async () => {
+    const h = await harness();
+    await h.publishMenu();
+    expect(h.texts(await h.say(CHARU, "2 dal"))).toContain("What name");
+  });
+});
+
+describe("owner customer commands", () => {
+  it("ADD, AREA, NAME and NOTE fill in a customer", async () => {
+    const h = await harness();
+    expect(h.texts(await h.say(OWNER, `ADD ${BOB} Bob Kumar`))).toContain("Added Bob Kumar");
+    expect(h.texts(await h.say(OWNER, `ADD ${BOB}`))).toContain("already a customer");
+    expect(h.texts(await h.say(OWNER, `AREA ${BOB} newport`))).toContain("Area for Bob Kumar: Newport");
+    expect(h.texts(await h.say(OWNER, `AREA ${BOB} Hoboken`))).toContain("isn't one of the areas: Journal Square, Newport, Heights");
+    await h.say(OWNER, `NOTE ${BOB} Blue door, ring twice`);
+    expect(h.texts(await h.say(OWNER, `NAME ${CHARU} X`))).toContain("Use ADD first");
+    expect((await h.db.select().from(customers).where(eq(customers.phone, BOB)))[0]).toMatchObject({
+      name: "Bob Kumar",
+      area: "Newport",
+      addressNote: "Blue door, ring twice",
+    });
   });
 });
 

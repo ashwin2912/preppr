@@ -8,6 +8,7 @@ import { normalizePhone } from "../lib/phone";
 import { formatClock, formatDay, localDate, parseClock, zonedInstant } from "../lib/time";
 import { send, sendLongText, sendText } from "../wa/send";
 import type { Incoming } from "../wa/types";
+import { cmdAdd, cmdSetField } from "./customerAdmin";
 import { cmdBalance, cmdBlock, cmdDues, cmdPaid, cmdPending, settlePayment } from "./payments";
 import { tagIntent } from "./state";
 
@@ -18,6 +19,10 @@ ORDERS — quick list of orders so far
 CLOSE — stop taking orders now and send the summary
 OPEN [time] — reopen ordering until time (default: 30 min from now)
 RESUME <number> — turn the bot back on for a customer
+
+*Customers*
+ADD <number> [name] — add a regular; they skip the sign-up questions
+NAME / AREA / NOTE <number> <value> — fill in name, delivery area, delivery note
 
 *Payments*
 PENDING — payments customers reported, waiting for you
@@ -176,6 +181,14 @@ export async function handleOwner(ctx: Ctx, msg: Incoming) {
       return cmdOpen(ctx, phone, arg);
     case "RESUME":
       return cmdResume(ctx, phone, arg);
+    case "ADD":
+      return cmdAdd(ctx, phone, arg);
+    case "NAME":
+      return cmdSetField(ctx, phone, arg, "name");
+    case "AREA":
+      return cmdSetField(ctx, phone, arg, "area");
+    case "NOTE":
+      return cmdSetField(ctx, phone, arg, "addressNote");
     case "PAID":
       return cmdPaid(ctx, phone, arg);
     case "VERIFY":

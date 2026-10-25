@@ -196,3 +196,22 @@ describe("OpenAI-compatible parser", () => {
     expect(second.messages.at(-1).content).toMatch(/invalid/);
   });
 });
+
+describe("contacts (.vcf) import", () => {
+  it("imports every number on each card under its name", async () => {
+    const { parseContactsVcf } = await import("../src/domain/importCustomers");
+    const vcf = [
+      "BEGIN:VCARD", "VERSION:3.0", "FN:Priya Shah", "TEL;type=CELL:(201) 555-0001", "item1.TEL:+1 201 555 0002", "END:VCARD",
+      "BEGIN:VCARD", "VERSION:3.0", "N:Kumar;Rahul;;;", "TEL;TYPE=cell:2015550003", "END:VCARD",
+      "BEGIN:VCARD", "FN:Long Name That", " Continues", "TEL:12", "END:VCARD",
+    ].join("\r\n");
+    const { rows, report } = parseContactsVcf(vcf);
+    expect(rows.map((r) => [r.phone, r.name])).toEqual([
+      ["+12015550001", "Priya Shah"],
+      ["+12015550002", "Priya Shah"],
+      ["+12015550003", "Rahul Kumar"],
+    ]);
+    expect(rows[0]).toMatchObject({ area: null, addressNote: null });
+    expect(report.badPhones).toEqual([{ row: 3, phone: "12" }]);
+  });
+});

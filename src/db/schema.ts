@@ -150,6 +150,8 @@ export const inbox = pgTable(
     waMessageId: text("wa_message_id").notNull().unique(),
     phone: text("phone").notNull(),
     payload: jsonb("payload_json").$type<InboundMessage>().notNull(),
+    /** Sender's WhatsApp profile name, from the webhook's `contacts`. */
+    profileName: text("profile_name"),
     ...queueColumns(),
   },
   (t) => [index("inbox_status_next").on(t.status, t.nextAttemptAt), index("inbox_phone_created").on(t.phone, t.createdAt)],

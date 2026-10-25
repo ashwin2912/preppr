@@ -41,6 +41,48 @@ export function parseCustomersCsv(csv: string, areas: string[]) {
   return { rows: [...rows.values()], report };
 }
 
+const unescapeVcf = (v: string) => v.replace(/\\n/gi, " ").replace(/\\([,;\\])/g, "$1").trim();
+
+/**
+ * Parse a contacts export (.vcf, from iPhone/Android/Google Contacts). Every
+ * phone number on a card is imported under the card's name, since we can't
+ * tell which one is on WhatsApp. No areas: the owner fills those in later.
+ */
+export function parseContactsVcf(vcf: string) {
+  const report: ImportReport = { inserted: 0, updated: 0, badPhones: [], areaMismatches: [], duplicates: [] };
+  const rows = new Map<string, Row>();
+  const lines = vcf.replace(/\r\n/g, "\n").replace(/\n[ \t]/g, "").split("\n"); // unfold continuation lines
+  let card = 0;
+  let name: string | null = null;
+  let phones: string[] = [];
+  for (const line of lines) {
+    const l = line.trim();
+    if (/^BEGIN:VCARD$/i.test(l)) {
+      card++;
+      name = null;
+      phones = [];
+    } else if (/^(item\d+\.)?FN[;:]/i.test(l)) {
+      name = unescapeVcf(l.slice(l.indexOf(":") + 1)) || name;
+    } else if (/^(item\d+\.)?N[;:]/i.test(l) && !name) {
+      const [last = "", first = ""] = l.slice(l.indexOf(":") + 1).split(";").map(unescapeVcf);
+      name = [first, last].filter(Boolean).join(" ") || null;
+    } else if (/^(item\d+\.)?TEL[;:]/i.test(l)) {
+      phones.push(l.slice(l.indexOf(":") + 1).replace(/^tel:/i, "").trim());
+    } else if (/^END:VCARD$/i.test(l)) {
+      for (const raw of phones) {
+        const phone = normalizePhone(raw);
+        if (!phone) {
+          report.badPhones.push({ row: card, phone: raw });
+          continue;
+        }
+        if (rows.has(phone)) report.duplicates.push(phone);
+        rows.set(phone, { phone, name: name?.slice(0, 60) ?? null, area: null, addressNote: null, notes: null });
+      }
+    }
+  }
+  return { rows: [...rows.values()], report };
+}
+
 /** Upsert parsed rows. CSV blanks never overwrite existing values. */
 export async function importCustomers(db: Q, rows: Row[], report: ImportReport, now = new Date()) {
   const existing = new Map(

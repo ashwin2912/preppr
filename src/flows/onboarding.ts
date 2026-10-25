@@ -5,8 +5,13 @@ import { send, sendText } from "../wa/send";
 import { MEDIA_TYPES, type Incoming } from "../wa/types";
 import { type ConvState, clearState, setState } from "./state";
 
-/** Imported or returning customers skip onboarding once name and area are known. */
-export const needsOnboarding = (c: Customer | null) => !c || !c.name || !c.area;
+/**
+ * Only numbers the kitchen doesn't know yet are onboarded (name → area →
+ * note). Known customers (imported from the owner's contacts or a CSV, or
+ * added with ADD) go straight to ordering, even without a name or area: the
+ * owner fills those in (AREA, NAME, NOTE commands or a re-import).
+ */
+export const needsOnboarding = (c: Customer | null) => !c;
 
 export function matchArea(input: string, areas: string[]): string | null {
   const s = input.trim().toLowerCase();
