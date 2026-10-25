@@ -96,6 +96,7 @@ CSV header: `phone,name,area,address_note` (optional extra column `notes`). Phon
 
 ## Docs
 
+- [docs/deployment-plan.md](docs/deployment-plan.md): deploying one kitchen, then many; productizing (multi-tenant, Embedded Signup, billing).
 - [docs/meta-setup.md](docs/meta-setup.md): WhatsApp Cloud API setup, step by step. Start business verification early; it takes days.
 - [docs/owner-setup.md](docs/owner-setup.md): for the owner: adding regulars, redirecting old chats, `CHATS`, exporting past chats.
 - [docs/monitoring.md](docs/monitoring.md): Sentry and UptimeRobot setup, what each alert means, runbook.
