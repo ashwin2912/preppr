@@ -36,7 +36,7 @@ flowchart LR
 
 | Stage | Kitchens | Hosting | Main work |
 |---|---|---|---|
-| 0. Pilot | 1 (20–30 customers) | Laptop + tunnel, or Cloud Run | Meta setup, real database, parser eval on real messages, one week side by side with manual orders |
+| 0. Pilot | 1 (20–30 customers) | Laptop or small VPS + Cloudflare tunnel + Neon (`pilot-cloudflare.md`) | Meta setup, real database, parser eval on real messages, one week side by side with manual orders |
 | 1. Production | 1 (~500 orders/day) | Cloud Run + Neon | CI/CD, backups, alerts wired, runbook owner |
 | 2. Few kitchens | 2–10 | One deployment per kitchen ("cell"), same image | Per-kitchen config and secrets, a script to stand up a new kitchen |
 | 3. Product | 10+ | One multi-tenant deployment | Tenant model in the code, Meta Tech Provider + Embedded Signup, sign-up flow, billing, owner web app |
@@ -57,6 +57,8 @@ flowchart LR
 | WhatsApp | Cloud API, service conversations | Replies inside the 24 h window are free | $0 (templates extra) |
 | Monitoring | Sentry (free) + UptimeRobot (free) on `/readyz` | Setup in `monitoring.md` | $0 |
 | **Total** | | | **~$15–55 per kitchen** |
+
+For the pilot, `pilot-cloudflare.md` runs the same image with Docker Compose on a laptop or VPS behind a Cloudflare tunnel, with a Cloudflare cron Worker for the cutoff. The app itself can't run on Cloudflare Workers (it is a long-running process), and Cloudflare Containers sleep when idle and need a wrapper Worker, so they don't fit without extra work.
 
 Equally valid alternatives that run the same Docker image: Fly.io or Railway (simple, about the same cost), a small VPS with Docker Compose and Postgres (cheapest, but you own backups and updates), or the always-on laptop from `system-design.md` (fine for the pilot only).
 

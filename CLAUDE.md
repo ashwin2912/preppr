@@ -48,14 +48,26 @@ Before committing: `pnpm typecheck && pnpm test && pnpm build`. The default `.en
 
 ## Docs
 
+- `docs/pilot-cloudflare.md`: pilot on one machine (laptop now, VPS later): `deploy/pilot/` has the Compose file (app + cloudflared) and the cutoff cron Worker.
 - `docs/deployment-plan.md`: how to deploy one kitchen, and how to productize for many.
 - `docs/production-readiness.md`: launch checklist and status.
 - `docs/meta-setup.md`, `docs/google-sheet-setup.md`, `docs/monitoring.md` (alerts + runbook), `docs/owner-setup.md` (for the kitchen owner).
 - `system-design.md`: original architecture and laptop setup (partly superseded by the inbox/outbox design in README "Design notes").
 
+## Status (2026-10-28)
+
+- **Built and tested (fakes):** ordering flows, owner commands, payments/ledger, cutoff, watchdog alerts, delivery statuses, Sheet sync, chat viewer, contact import, chat-export import.
+- **Stage 0 pilot, first kitchen: in progress.**
+  - Hosting decided: laptop now, small VPS later, same `deploy/pilot/docker-compose.yml` (app + `cloudflared` named tunnel), Neon free tier, cutoff via Cloudflare Worker cron (`deploy/pilot/cutoff-cron`). App can't run on Cloudflare Workers/Containers (long-running worker), so Cloudflare is only tunnel + cron.
+  - Pilot files checked: Compose config valid, Worker bundles (`wrangler deploy --dry-run`), app endpoints and cutoff auth checked with `node dist/index.js`. Not yet run under Docker or against Meta.
+  - Meta: the kitchen owner owns the business portfolio and WABA; we are invited as admin and do the app, system-user token, number registration and webhook. Week 1 on Meta's test number (owner + up to 4 customers), then the owner's new bot number once verification and display name are approved. Owner instructions were sent as WhatsApp messages (not in the repo).
+  - Meta Tech Provider / Embedded Signup deferred to Stage 3 (multi-tenant, self-serve).
+- **Next:** owner finishes portfolio + verification + admin invite; buy domain on Cloudflare, create tunnel, Neon project, fill `.env`; run the Compose stack on the laptop; webhook on test number; smoke test (`docs/pilot-cloudflare.md` step 9); collect real messages for the parser eval.
+
 ## Open items
 
 - Parser not yet evaluated on real customer messages (collect with `pnpm import:chat-export --fixtures`).
 - Not yet deployed with a permanent database; the Sheet and Sentry integrations are tested only against fakes/mocks.
+- `docs/deployment-plan.md` refers to a README "How to test" checklist that doesn't exist; the pilot smoke list is in `docs/pilot-cloudflare.md`.
 - CI runs tests on PGlite only; a real-Postgres CI job is still to add.
 - Migrations run at startup on every instance; for multi-instance deploys run `pnpm db:migrate` as a separate step (see deployment plan).

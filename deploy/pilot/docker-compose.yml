@@ -1,0 +1,31 @@
+# Pilot: one kitchen on one machine (laptop now, small VPS later), public via a
+# Cloudflare named tunnel. Postgres is Neon (DATABASE_URL in .env).
+# Run from the repo root (docs/pilot-cloudflare.md):
+#   docker compose --env-file .env -f deploy/pilot/docker-compose.yml up -d --build
+
+services:
+  app:
+    build: ../..
+    env_file: ../../.env
+    environment:
+      PORT: "8080"
+    volumes:
+      # Google service-account key, if GOOGLE_SERVICE_ACCOUNT_JSON=./secrets/...
+      - ../../secrets:/app/secrets:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Routes https://bot.<domain> to http://app:8080 (public hostname set in the
+  # Cloudflare dashboard). No ports are opened on the machine.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.3
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}
+    restart: unless-stopped
+    depends_on:
+      - app
