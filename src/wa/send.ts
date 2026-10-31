@@ -25,24 +25,35 @@ export async function windowOpen(ctx: Ctx, phone: string): Promise<boolean> {
 }
 
 /**
- * The only way the bot sends anything. Refuses (and logs) when the
- * recipient's 24h customer-service window is closed, since the MVP sends
- * no templates. Otherwise queues the message in the outbox, which the worker
- * sends with retries (src/jobs/worker.ts). Returns true if queued.
+ * The only way the bot sends free-form messages. Refuses (and logs) when the
+ * recipient's 24h customer-service window is closed. Otherwise queues the
+ * message in the outbox, which the worker sends with retries
+ * (src/jobs/worker.ts). `key` overrides the `ctx.out` idempotency key, for
+ * sends that must dedupe across handlers (menu push). Returns true if queued.
  */
-export async function send(ctx: Ctx, msg: Outbound): Promise<boolean> {
+export async function send(ctx: Ctx, msg: Outbound, key?: string): Promise<boolean> {
+  if (msg.kind === "template") throw new Error("templates go through sendTemplate");
   if (!(await windowOpen(ctx, msg.to))) {
     log.warn("window_closed: send blocked", { to: msg.to, kind: msg.kind, body: msg.body.slice(0, 200) });
     return false;
   }
-  const idemKey = ctx.out ? `${ctx.out.prefix}:${ctx.out.n++}` : `adhoc:${randomUUID()}`;
+  await enqueue(ctx, msg, key);
+  return true;
+}
+
+/** Queue an approved template. The only send allowed outside the 24h window. */
+export async function sendTemplate(ctx: Ctx, msg: Extract<Outbound, { kind: "template" }>, key: string): Promise<void> {
+  await enqueue(ctx, msg, key);
+}
+
+async function enqueue(ctx: Ctx, msg: Outbound, key?: string) {
+  const idemKey = key ?? (ctx.out ? `${ctx.out.prefix}:${ctx.out.n++}` : `adhoc:${randomUUID()}`);
   const now = ctx.now();
   await ctx.db
     .insert(outbox)
     .values({ idemKey, to: msg.to, payload: msg, createdAt: now, nextAttemptAt: now })
     .onConflictDoNothing();
   ctx.kick?.();
-  return true;
 }
 
 export const sendText = (ctx: Ctx, to: string, body: string) => send(ctx, { kind: "text", to, body });

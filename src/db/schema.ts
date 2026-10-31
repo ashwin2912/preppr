@@ -42,6 +42,10 @@ export const customers = pgTable("customers", {
   status: text("status", { enum: ["active", "blocked"] }).notNull().default("active"),
   /** Owner's free-text notes ("leave at side door"). */
   notes: text("notes"),
+  /** Wants the daily "ordering is open" message (coexistence menu push). Null = never asked. */
+  menuOptIn: boolean("menu_opt_in"),
+  menuOptInAt: ts("menu_opt_in_at"),
+  menuOptInAskedAt: ts("menu_opt_in_asked_at"),
   updatedAt: ts("updated_at").notNull().defaultNow(),
 });
 
@@ -121,6 +125,12 @@ export const messages = pgTable(
     intent: text("intent"),
     /** Who read an inbound customer message: the code rules or the model. */
     parser: text("parser", { enum: ["rules", "model"] }),
+    /**
+     * Outbound: "bot", or "app" when the owner typed it in the WhatsApp
+     * Business app (coexistence echo). "history": imported by the one-time
+     * history sync, either direction. Null on rows from before this column.
+     */
+    source: text("source", { enum: ["bot", "app", "history"] }),
     createdAt: ts("created_at").notNull().defaultNow(),
   },
   (t) => [index("messages_phone_dir_created").on(t.phone, t.direction, t.createdAt)],
@@ -192,6 +202,13 @@ export const waStatuses = pgTable("wa_statuses", {
   errorText: text("error_text"),
   statusAt: ts("status_at").notNull(),
   updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
+/** The owner's WhatsApp Business app contacts, from the coexistence contact sync. Not customers. */
+export const waContacts = pgTable("wa_contacts", {
+  phone: text("phone").primaryKey(),
+  name: text("name"),
+  syncedAt: ts("synced_at").notNull().defaultNow(),
 });
 
 /** Small shared key/value store: sync markers, alert dedupe. */

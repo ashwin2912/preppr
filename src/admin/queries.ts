@@ -99,6 +99,8 @@ export const needsLook = (r: ConversationRow) => r.flags.some((f) => f !== "mode
 
 export type Bubble =
   | { dir: "in"; at: Date; text: string | null; type: string; intent: string | null; parser: string | null }
+  /** Typed by the owner in the WhatsApp Business app (coexistence), live or from the history sync. */
+  | { dir: "owner"; at: Date; text: string | null; type: string }
   | {
       dir: "out";
       at: Date;
@@ -125,7 +127,11 @@ export async function transcript(db: Q, phone: string, now: Date, days: number):
     .select()
     .from(messages)
     .where(and(eq(messages.phone, phone), eq(messages.direction, "in"), gte(messages.createdAt, since)));
-  // Outbound comes from the outbox, so queued and failed replies show too.
+  const owners = await db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.phone, phone), eq(messages.direction, "out"), inArray(messages.source, ["app", "history"]), gte(messages.createdAt, since)));
+  // Bot outbound comes from the outbox, so queued and failed replies show too.
   const outs = await db
     .select({ o: outbox, s: waStatuses })
     .from(outbox)
@@ -133,6 +139,7 @@ export async function transcript(db: Q, phone: string, now: Date, days: number):
     .where(and(eq(outbox.to, phone), gte(outbox.createdAt, since)));
   const bubbles: Bubble[] = [
     ...ins.map((m) => ({ dir: "in" as const, at: m.createdAt, text: m.body, type: m.type, intent: m.intent, parser: m.parser })),
+    ...owners.map((m) => ({ dir: "owner" as const, at: m.createdAt, text: m.body, type: m.type })),
     ...outs.map(({ o, s }) => ({
       dir: "out" as const,
       at: o.createdAt,

@@ -71,6 +71,24 @@ export function toGraphPayload(msg: Outbound): Record<string, unknown> {
           },
         },
       };
+    case "template":
+      return {
+        ...base,
+        type: "template",
+        template: {
+          name: msg.name,
+          language: { code: msg.language },
+          components: [
+            ...(msg.params.length ? [{ type: "body", parameters: msg.params.map((text) => ({ type: "text", text })) }] : []),
+            ...msg.buttons.map((payload, i) => ({
+              type: "button",
+              sub_type: "quick_reply",
+              index: String(i),
+              parameters: [{ type: "payload", payload }],
+            })),
+          ],
+        },
+      };
   }
 }
 
@@ -79,12 +97,16 @@ export class GraphWaClient implements WaClient {
     private token: string,
     private phoneNumberId: string,
     private version: string,
+    /** A BSP proxy instead of the Graph API: its messages URL and API-key header. */
+    private opts: { url?: string; authHeader?: string } = {},
   ) {}
 
   private async post(body: unknown): Promise<any> {
-    const res = await fetch(`https://graph.facebook.com/${this.version}/${this.phoneNumberId}/messages`, {
+    const url = this.opts.url ?? `https://graph.facebook.com/${this.version}/${this.phoneNumberId}/messages`;
+    const header = this.opts.authHeader ?? "Authorization";
+    const res = await fetch(url, {
       method: "POST",
-      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      headers: { [header]: header.toLowerCase() === "authorization" ? `Bearer ${this.token}` : this.token, "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
     const json = await res.json().catch(() => ({}));
@@ -135,12 +157,17 @@ export class DryRunWaClient implements WaClient {
     return `dry-${++this.n}-${Date.now()}`;
   }
 
-  async markReadTyping(): Promise<void> {}
+  /** Message ids marked read (tests). */
+  read: string[] = [];
+  async markReadTyping(messageId: string): Promise<void> {
+    this.read.push(messageId);
+  }
 }
 
 export function renderOutbound(msg: Outbound): string {
   const head = `\n── bot → ${msg.to} ──\n${msg.body}`;
   if (msg.kind === "buttons") return `${head}\n${msg.buttons.map((b) => `[${b.title}]`).join(" ")}`;
   if (msg.kind === "list") return `${head}\n${msg.rows.map((r) => `• ${r.title}`).join("\n")}`;
+  if (msg.kind === "template") return `\n── bot → ${msg.to} (template ${msg.name}) ──\n${msg.body}`;
   return head;
 }

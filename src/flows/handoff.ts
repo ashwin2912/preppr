@@ -8,6 +8,10 @@ import { clearState, tagIntent } from "./state";
 
 export const TAKEOVER_MS = 4 * 60 * 60 * 1000;
 
+/** Where the owner replies: their own app on a shared number, else a wa.me link to the customer. */
+const chatLine = (ctx: Ctx, phone: string) =>
+  ctx.cfg.coexistence ? "Reply to them in your WhatsApp Business app." : `Chat: ${waLink(phone)}`;
+
 const who = (c: Customer | null, phone: string) =>
   `${c?.name ?? "New customer"} (${c?.area ?? "no area"})\n${phone}`;
 
@@ -22,7 +26,7 @@ export async function handoff(ctx: Ctx, customer: Customer | null, msg: Incoming
     `🙋 *Needs you:* ${who(customer, msg.phone)}\n` +
       `Reason: ${reason}\n` +
       `Last message: "${msg.text}"\n\n` +
-      `Chat: ${waLink(msg.phone)}\n` +
+      `${chatLine(ctx, msg.phone)}\n` +
       `Bot is paused for them for 4h. Send *RESUME ${msg.phone}* to turn it back on.`,
   );
   await sendText(ctx, msg.phone, "No problem — I've let the kitchen know and someone will message you shortly 🙏");
@@ -34,6 +38,6 @@ export async function forwardToOwner(ctx: Ctx, customer: Customer | null, msg: I
     ctx,
     `📨 *${label}:* ${who(customer, msg.phone)}\n` +
       (msg.text ? `"${msg.text}"\n` : "") +
-      `Chat: ${waLink(msg.phone)}`,
+      chatLine(ctx, msg.phone),
   );
 }

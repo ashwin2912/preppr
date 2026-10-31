@@ -1,10 +1,10 @@
-import { count, eq } from "drizzle-orm";
+import { and, count, eq, isNull } from "drizzle-orm";
 import { conversationState, customers, menus, orders, type Menu } from "../db/schema";
 import type { Ctx } from "../ctx";
 import { buildMenu, currentMenu, formatBroadcast, formatMenuPreview, ownerMenu } from "../domain/menu";
 import { buildOrdersList, buildSummary, loadSummaryData } from "../domain/summary";
 import { errFields, log } from "../lib/log";
-import { normalizePhone } from "../lib/phone";
+import { normalizePhone, waLink } from "../lib/phone";
 import { formatClock, formatDay, localDate, parseClock, zonedInstant } from "../lib/time";
 import { send, sendLongText, sendText } from "../wa/send";
 import { InboundMessageSchema, type Incoming } from "../wa/types";
@@ -13,6 +13,7 @@ import { signViewerToken } from "../admin/auth";
 import { cmdAdd, cmdSetField } from "./customerAdmin";
 import { cmdBalance, cmdBlock, cmdDues, cmdPaid, cmdPending, settlePayment } from "./payments";
 import { tagIntent } from "./state";
+import { pushMenu, STARTER_LIMIT } from "../jobs/menuPush";
 
 export const HELP = `*Owner commands*
 MENU <menu text> — set a menu, e.g. MENU Mon: Dal makhani 6, Jeera rice 4, Roti 1 each. Cutoff 10:30
@@ -20,7 +21,7 @@ SUMMARY — full report for today
 ORDERS — quick list of orders so far
 CLOSE — stop taking orders now and send the summary
 OPEN [time] — reopen ordering until time (default: 30 min from now)
-RESUME <number> — turn the bot back on for a customer
+RESUME <number> — turn the bot back on for a customer (also after you reply to them yourself)
 
 *Customers*
 ADD <number> [name] — add a regular; they skip the sign-up questions
@@ -34,6 +35,7 @@ PAID <number> <amount> [cash|zelle|venmo|card] — record a payment yourself
 BALANCE <number> — what a customer owes
 DUES — everyone who owes money
 BLOCK <number> / UNBLOCK <number> — make the bot ignore a customer
+OPTIN <number>|ALL / OPTOUT <number> — who gets the daily "ordering is open" message
 CHATS [number] — private link to read the bot's conversations (works 12 h)
 HELP — this list`;
 
@@ -100,12 +102,60 @@ async function publish(ctx: Ctx, phone: string, menuId: number) {
     }
     // Only one menu per date exists, so publishing can't collide with another active one for the same day.
     const [pub] = await ctx.db.update(menus).set({ status: "active" }).where(eq(menus.id, m.id)).returning();
+    if (ctx.cfg.coexistence) return offerPush(ctx, phone, pub!);
     await sendText(ctx, phone, `✅ Published. Orders open until ${formatClock(m.cutoffAt, ctx.cfg.tz)}.\nForward the next message to your broadcast lists 👇`);
     await sendText(ctx, phone, formatBroadcast(pub!, ctx.cfg));
     return;
   }
+  if (ctx.cfg.coexistence) return offerPush(ctx, phone, m);
   await sendText(ctx, phone, `This menu is already ${m.status}. Here's the broadcast again 👇`);
   await sendText(ctx, phone, formatBroadcast(m, ctx.cfg));
+}
+
+/** Shared number: broadcast lists are off, so the bot sends the menu itself once the owner says so. */
+async function offerPush(ctx: Ctx, phone: string, m: Menu) {
+  const [{ n }] = (await ctx.db
+    .select({ n: count() })
+    .from(customers)
+    .where(and(eq(customers.status, "active"), eq(customers.menuOptIn, true)))) as [{ n: number }];
+  await send(ctx, {
+    kind: "buttons",
+    to: phone,
+    body:
+      `✅ Published. Orders open until ${formatClock(m.cutoffAt, ctx.cfg.tz)}.\n\n` +
+      `Send the menu to ${n} customer${n === 1 ? "" : "s"} who asked for it?\n` +
+      `For your Status or groups, the order link is ${waLink(`+${ctx.cfg.botNumber}`, "ORDER")}`,
+    buttons: [
+      { id: `menu_push:${m.id}`, title: "Send menu 📣" },
+      { id: `menu_nopush:${m.id}`, title: "Not now" },
+    ],
+  });
+}
+
+async function cmdPush(ctx: Ctx, phone: string, menuId: number) {
+  const [m] = await ctx.db.select().from(menus).where(eq(menus.id, menuId));
+  if (!m || m.status !== "active" || m.cutoffAt <= ctx.now()) return sendText(ctx, phone, "That menu isn't open any more.");
+  const r = await pushMenu(ctx, m);
+  if (r.already) return sendText(ctx, phone, "Already sent this menu to customers ✅");
+  const lines = [`📣 Sent to ${r.inChat + r.template} customer${r.inChat + r.template === 1 ? "" : "s"} (${r.inChat} in chat, ${r.template} as the "ordering is open" message).`];
+  if (r.notOptedIn) lines.push(`${r.notOptedIn} customer${r.notOptedIn === 1 ? " hasn't" : "s haven't"} asked for it yet: OPTIN <number> or OPTIN ALL if they already get your menu.`);
+  if (r.template > STARTER_LIMIT) lines.push(`⚠️ More than ${STARTER_LIMIT} reminder messages: Meta may hold some back until the account's limit goes up.`);
+  await sendText(ctx, phone, lines.join("\n"));
+}
+
+async function cmdOptIn(ctx: Ctx, phone: string, arg: string, on: boolean) {
+  const all = on && arg.trim().toUpperCase() === "ALL";
+  const target = all ? null : normalizePhone(arg);
+  if (!all && !target) return sendText(ctx, phone, on ? "Use OPTIN +12015551234 or OPTIN ALL" : "Use OPTOUT +12015551234");
+  const now = ctx.now();
+  const res = await ctx.db
+    .update(customers)
+    .set({ menuOptIn: on, menuOptInAt: now, updatedAt: now })
+    .where(all ? and(eq(customers.status, "active"), isNull(customers.menuOptIn)) : eq(customers.phone, target!))
+    .returning({ phone: customers.phone });
+  if (all) return sendText(ctx, phone, `${res.length} customer${res.length === 1 ? "" : "s"} will get the daily message. (Customers who said no or sent STOP are left out.)`);
+  if (!res.length) return sendText(ctx, phone, `No customer with number ${target}.`);
+  await sendText(ctx, phone, on ? `${target} will get the daily message.` : `${target} won't get the daily message.`);
 }
 
 async function cmdClose(ctx: Ctx, phone: string) {
@@ -178,6 +228,8 @@ export async function handleOwner(ctx: Ctx, msg: Incoming) {
     await tagIntent(ctx, msg.id, `owner_${kind}`);
     if (kind === "menu_publish") return publish(ctx, phone, Number(id));
     if (kind === "menu_edit") return sendText(ctx, phone, "Send the corrected menu as a new MENU message.");
+    if (kind === "menu_push") return cmdPush(ctx, phone, Number(id));
+    if (kind === "menu_nopush") return sendText(ctx, phone, "OK, not sent. Tap Send menu above any time before the cutoff.");
     if (kind === "pay_ok" || kind === "pay_no") return settlePayment(ctx, phone, Number(id), kind === "pay_ok");
     return;
   }
@@ -235,6 +287,9 @@ export async function handleOwner(ctx: Ctx, msg: Incoming) {
       return cmdBalance(ctx, phone, arg);
     case "DUES":
       return cmdDues(ctx, phone);
+    case "OPTIN":
+    case "OPTOUT":
+      return cmdOptIn(ctx, phone, arg, cmd === "OPTIN");
     case "BLOCK":
     case "UNBLOCK":
       return cmdBlock(ctx, phone, arg, cmd === "BLOCK");

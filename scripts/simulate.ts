@@ -26,7 +26,7 @@ const MIN = 60 * 1000;
 
 const step = (title: string) => console.log(`\n\n━━━━━━━━ ${title} ━━━━━━━━`);
 async function say(from: string, input: Parameters<typeof h.say>[1]) {
-  const shown = typeof input === "string" ? input : "replyId" in input ? `[tap ${input.title ?? input.replyId}]` : `[${input.type}]`;
+  const shown = typeof input === "string" ? input : "replyId" in input ? `[tap ${input.title ?? input.replyId}]` : "templateButton" in input ? `[tap ${input.title ?? input.templateButton}]` : `[${input.type}]`;
   console.log(`\n>> ${from === OWNER ? "OWNER" : from}: ${shown}`);
   const out = await h.say(from, input);
   h.advance(MIN);

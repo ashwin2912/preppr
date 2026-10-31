@@ -34,6 +34,13 @@ The page is read-only. To reply, tap **Open in WhatsApp**.
 
 This helps us test the bot on how your customers really write. In WhatsApp, open a customer chat → their name → **Export chat** → **Without media** → send the file to whoever runs the bot. A handful of busy customers is plenty. Names and numbers are masked before anything is used.
 
-## Why can't the bot read my own WhatsApp chats?
+## If the bot is on your own business number
 
-WhatsApp only allows that in a mode called "coexistence", which moves the bot onto your business number. It would also turn off your broadcast lists, which you use for the daily menu, so we're not using it for now.
+Some kitchens run the bot on the number customers already message (WhatsApp calls this "coexistence"). Then:
+
+- **Send commands from your personal WhatsApp**, not the business phone: MENU, SUMMARY, PAID and the rest go from your personal number to your business number. Alerts and the morning summary arrive there too.
+- **Section 2 isn't needed**: customers are already in the right chat. Turn off any greeting or away message that sends them elsewhere.
+- **Reply to anyone in the app as usual.** When you type in a customer's chat, the bot stays quiet for them for 4 hours. Send `RESUME <number>` to hand back sooner.
+- **The bot only answers people who want to order.** Friends, family and suppliers get no bot reply, and their chats stay unread for you.
+- **Broadcast lists stop working.** After you tap Publish, tap **Send menu**: the bot sends the menu to customers who asked for it. Add your regulars with `OPTIN <number>`, or `OPTIN ALL` for everyone who already gets your menu. Customers can reply STOP at any time.
+- **Open the WhatsApp Business app at least once every two weeks**, or WhatsApp disconnects the bot.

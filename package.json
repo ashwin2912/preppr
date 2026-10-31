@@ -15,7 +15,8 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "import:customers": "tsx scripts/import-customers.ts",
     "import:chat-export": "tsx scripts/import-chat-export.ts",
-    "simulate": "tsx scripts/simulate.ts"
+    "simulate": "tsx scripts/simulate.ts",
+    "wa:sync": "tsx scripts/wa-sync.ts"
   },
   "author": "",
   "packageManager": "pnpm@10.19.0",

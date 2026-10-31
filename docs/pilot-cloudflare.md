@@ -20,11 +20,11 @@ Customers -> Meta Cloud API -> https://bot.<domain>/webhook -> Cloudflare tunnel
 
 ## What the kitchen does
 
-Nothing in Meta or Cloudflare. We own the Meta app, the WhatsApp Business Account and the bot number. The owner sends us:
+Nothing in Cloudflare. In Meta, the owner owns the business portfolio and the WhatsApp Business Account, gets the business verified and invites us as admin; we do the app, the system-user token and the webhook. The first kitchen runs the bot on the owner's existing number (coexistence, `docs/coexistence-setup.md`), so the owner also needs a personal WhatsApp for owner commands. The owner sends us:
 - owner phone number(s), delivery areas, payment instructions, kitchen days, cutoff time;
 - their phone contacts as a `.vcf` export (for `pnpm import:customers`), or they share contacts with the bot later (`docs/owner-setup.md`).
 
-Week 1 can run on Meta's free **test number** (up to 5 recipient phones: the owner and 3–4 friendly customers). Switch to a dedicated bot number with the kitchen's display name once it's approved (`docs/meta-setup.md`). Start business verification on day 1; it takes days.
+Week 1 can run on Meta's free **test number** (up to 5 recipient phones: the owner and 3–4 friendly customers). Then move to the owner's own number through coexistence onboarding (`docs/coexistence-setup.md`), or to a dedicated bot number (`docs/meta-setup.md` step 8). Start business verification on day 1; it takes days.
 
 ## One-time setup (shared)
 

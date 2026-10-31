@@ -8,7 +8,8 @@ import { sendText } from "../wa/send";
 import { recordStatuses } from "../wa/statuses";
 import { InboundMessageSchema, WebhookPayloadSchema, type Incoming, type InboundMessage } from "../wa/types";
 import { handleCustomer, sendMenu } from "./customer";
-import { handleOnboarding, needsOnboarding } from "./onboarding";
+import { asksToOrder, handleOnboarding, needsOnboarding } from "./onboarding";
+import { recordContacts, recordEchoes, recordHistory } from "./coexistence";
 import { handleOwner } from "./owner";
 import { forwardToOwner } from "./handoff";
 import { getState, tagIntent } from "./state";
@@ -43,6 +44,24 @@ export async function enqueuePayload(deps: Deps, payload: unknown): Promise<numb
   let queued = 0;
   for (const entry of parsed.data.entry) {
     for (const change of entry.changes) {
+      // Coexistence adds fields; only "messages" carries customer messages to route.
+      const field = change.field ?? "messages";
+      if (field === "smb_message_echoes") {
+        await recordEchoes(deps, change.value.message_echoes ?? []);
+        continue;
+      }
+      if (field === "history") {
+        await recordHistory(deps, change.value.history ?? []);
+        continue;
+      }
+      if (field === "smb_app_state_sync") {
+        await recordContacts(deps, change.value.state_sync ?? []);
+        continue;
+      }
+      if (field !== "messages") {
+        log.info("ignored webhook field", { field });
+        continue;
+      }
       if (change.value.statuses?.length) await recordStatuses(deps, change.value.statuses);
       for (const raw of change.value.messages ?? []) {
         const m = InboundMessageSchema.safeParse(raw);
@@ -110,8 +129,7 @@ export async function handleInbound(deps: Deps, row: InboxRow) {
     }
   }
 
-  if (row.attempts === 1) void deps.wa.markReadTyping(msg.id);
-  await route(ctx, msg, row.profileName);
+  await route(ctx, msg, row.profileName, row.attempts === 1);
 }
 
 /** Called once an inbox row has used up its retries. */
@@ -127,8 +145,15 @@ export async function inboundFailed(deps: Deps, row: InboxRow, error?: unknown) 
   await sendText(ctx, row.phone, "Sorry, something went wrong on our side. Please try again in a minute 🙏");
 }
 
-async function route(ctx: Ctx, msg: Incoming, profileName: string | null = null) {
-  if (ctx.cfg.ownerNumbers.includes(msg.phone)) return handleOwner(ctx, msg);
+async function route(ctx: Ctx, msg: Incoming, profileName: string | null, firstAttempt: boolean) {
+  // Only once the bot will answer: with a shared number, an unread chat is the owner's cue.
+  const markRead = () => {
+    if (firstAttempt) void ctx.wa.markReadTyping(msg.id);
+  };
+  if (ctx.cfg.ownerNumbers.includes(msg.phone)) {
+    markRead();
+    return handleOwner(ctx, msg);
+  }
 
   const now = ctx.now();
   await ctx.db.update(customers).set({ lastInboundAt: now }).where(eq(customers.phone, msg.phone));
@@ -145,6 +170,15 @@ async function route(ctx: Ctx, msg: Incoming, profileName: string | null = null)
     return;
   }
 
+  const st = await getState(ctx, msg.phone);
+  // On a shared number, friends and suppliers write too: only numbers asking to order get sign-up.
+  if (!customer && ctx.cfg.unknownSenders === "order_only" && !st.state.startsWith("onboarding_") && !asksToOrder(msg)) {
+    log.info("unknown sender, bot silent", { phone: msg.phone });
+    await tagIntent(ctx, msg.id, "unknown_silent");
+    return;
+  }
+  markRead();
+
   // Known customers imported without a name get their WhatsApp profile name.
   if (customer && !customer.name && profileName) {
     [customer] = await ctx.db
@@ -154,7 +188,6 @@ async function route(ctx: Ctx, msg: Incoming, profileName: string | null = null)
       .returning();
   }
 
-  const st = await getState(ctx, msg.phone);
   if (needsOnboarding(customer ?? null) || st.state.startsWith("onboarding_")) {
     const done = await handleOnboarding(ctx, msg, customer ?? null, st);
     if (!done) return;

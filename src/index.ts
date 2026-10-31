@@ -16,7 +16,7 @@ else log.warn("SENTRY_DSN not set: errors are only logged");
 const db = cfg.databaseUrl ? await connectPostgres(cfg.databaseUrl) : await connectPglite();
 if (!cfg.databaseUrl) log.warn("DATABASE_URL not set: using in-memory PGlite, data is lost on restart");
 
-const wa = cfg.waDryRun ? new DryRunWaClient() : new GraphWaClient(cfg.waToken, cfg.waPhoneNumberId, cfg.waGraphVersion);
+const wa = cfg.waDryRun ? new DryRunWaClient() : new GraphWaClient(cfg.waToken, cfg.waPhoneNumberId, cfg.waGraphVersion, { url: cfg.waApiUrl, authHeader: cfg.waAuthHeader });
 const picked = llmFromEnv();
 if (!picked) throw new Error("No parser API key: set ANTHROPIC_API_KEY, or LLM_PROVIDER + LLM_API_KEY + LLM_MODEL");
 const { llm, label } = picked;

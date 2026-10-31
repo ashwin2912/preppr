@@ -13,6 +13,10 @@ import { type ConvState, clearState, setState } from "./state";
  */
 export const needsOnboarding = (c: Customer | null) => !c;
 
+/** A first message from an unknown number that means "I want to order" (the shared link pre-fills ORDER). */
+export const asksToOrder = (msg: Incoming) =>
+  !!msg.replyId?.startsWith("menu_see:") || /\b(order|orders|menu|tiffin)\b/i.test(msg.text);
+
 export function matchArea(input: string, areas: string[]): string | null {
   const s = input.trim().toLowerCase();
   if (!s) return null;

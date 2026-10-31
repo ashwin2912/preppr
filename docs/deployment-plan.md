@@ -155,7 +155,7 @@ Isolation: every query takes a kitchen id, enforced in a small data-access layer
 - **Number choice per kitchen:**
   - (a) A new dedicated bot number (today's model; keeps broadcast lists on the owner's app).
   - (b) **Coexistence** on the owner's existing number. One number, full chat and contact sync, but broadcast lists are disabled, so the menu broadcast needs a replacement: Status, groups, or paid marketing templates.
-  - Offer (a) by default and (b) as an option.
+  - The first kitchen uses (b) (owner wants customers to stay in the existing chat); the menu push is a utility template, see `coexistence-setup.md`. Offer both.
 - **Message templates** become worth adding: "menu is out" to opted-in customers, balance reminders, and a summary that always reaches the owner. These are paid per message (Utility/Marketing pricing per country); pass the cost through or include a monthly allowance.
 
 ### 5.3 Kitchen sign-up flow (product)
@@ -219,7 +219,7 @@ flowchart TD
 
 1. **Hosting:** Cloud Run + Neon (recommended) or Fly/Railway/VPS?
 2. **Who owns the WhatsApp assets for kitchens 2+:** your portfolio (simpler now) or each kitchen's own (required for self-serve; needs Tech Provider status or a BSP)?
-3. **Dedicated bot number or coexistence** as the default for new kitchens, and the replacement for broadcast lists if coexistence.
+3. **Dedicated bot number or coexistence** as the default for new kitchens. The first kitchen uses coexistence, with a utility-template menu push instead of broadcast lists; the open question is whether that's the default.
 4. **When to go multi-tenant:** after which kitchen count, or when self-serve sign-up is needed?
 5. **Pricing:** flat tiers by order volume, or per order?
 6. **Templates:** which proactive messages are worth paying for (menu announcement, balance reminder, owner summary)?

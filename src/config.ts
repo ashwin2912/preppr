@@ -14,6 +14,15 @@ const EnvSchema = z.object({
   WA_APP_SECRET: z.string().min(1),
   WA_VERIFY_TOKEN: z.string().min(1),
   WA_GRAPH_VERSION: z.string().default("v23.0"),
+  WA_API_URL: z.string().url().optional(),
+  WA_AUTH_HEADER: z.string().default("Authorization"),
+  WA_COEXISTENCE: z
+    .string()
+    .optional()
+    .transform((v) => v === "1" || v === "true"),
+  UNKNOWN_SENDERS: z.enum(["onboard", "order_only"]).optional(),
+  MENU_TEMPLATE: z.string().default("daily_order_open"),
+  MENU_TEMPLATE_LANG: z.string().default("en_US"),
   WA_DRY_RUN: z
     .string()
     .optional()
@@ -45,6 +54,21 @@ export type Config = {
   waVerifyToken: string;
   waGraphVersion: string;
   waDryRun: boolean;
+  /** Full messages endpoint; unset = Graph API for `waPhoneNumberId`. Set for a BSP proxy. */
+  waApiUrl?: string;
+  /** "Authorization" sends `Bearer <token>`; any other header gets the bare token (e.g. a BSP's API-key header). */
+  waAuthHeader: string;
+  /**
+   * The number is shared with the owner's WhatsApp Business app (coexistence):
+   * the menu goes out by API instead of broadcast lists, and the bot stays out
+   * of chats the owner is handling.
+   */
+  coexistence: boolean;
+  /** onboard: any new number gets sign-up. order_only: only numbers that ask to order. */
+  unknownSenders: "onboard" | "order_only";
+  /** Utility template sent when a customer's 24 h window is closed (coexistence menu push). */
+  menuTemplate: string;
+  menuTemplateLang: string;
   /** Bot number, digits only (wa.me format). */
   botNumber: string;
   databaseUrl?: string;
@@ -80,6 +104,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   });
   const bot = normalizePhone(e.BOT_NUMBER);
   if (!bot) throw new Error(`Invalid BOT_NUMBER: ${e.BOT_NUMBER}`);
+  // The bot can't take commands from itself; with coexistence the owner uses a personal number.
+  if (ownerNumbers.includes(bot)) throw new Error("OWNER_NUMBERS must not include BOT_NUMBER; use the owner's personal number");
   const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const kitchenDays = csv(e.KITCHEN_DAYS).map((d) => {
     const day = DAYS.find((x) => x.toLowerCase() === d.slice(0, 3).toLowerCase());
@@ -96,6 +122,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     waVerifyToken: e.WA_VERIFY_TOKEN,
     waGraphVersion: e.WA_GRAPH_VERSION,
     waDryRun: e.WA_DRY_RUN,
+    waApiUrl: e.WA_API_URL || undefined,
+    waAuthHeader: e.WA_AUTH_HEADER,
+    coexistence: e.WA_COEXISTENCE,
+    unknownSenders: e.UNKNOWN_SENDERS ?? (e.WA_COEXISTENCE ? "order_only" : "onboard"),
+    menuTemplate: e.MENU_TEMPLATE,
+    menuTemplateLang: e.MENU_TEMPLATE_LANG,
     botNumber: bot.slice(1),
     databaseUrl: e.DATABASE_URL,
     ownerNumbers,

@@ -43,6 +43,13 @@
       "when": 1792965383903,
       "tag": "0005_solid_diamondback",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793237790261,
+      "tag": "0006_fat_quicksilver",
+      "breakpoints": true
     }
   ]
 }

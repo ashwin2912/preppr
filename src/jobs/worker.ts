@@ -100,7 +100,7 @@ export function createWorker(deps: Deps, opts: WorkerOptions = {}) {
     const msg = row.payload;
     await d.db
       .insert(messages)
-      .values({ waMessageId: waId, phone: msg.to, direction: "out", type: msg.kind, body: msg.body, raw: msg, createdAt: now })
+      .values({ waMessageId: waId, phone: msg.to, direction: "out", type: msg.kind, body: msg.body, raw: msg, source: "bot", createdAt: now })
       .onConflictDoNothing();
   }
 

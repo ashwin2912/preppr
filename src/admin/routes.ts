@@ -97,6 +97,10 @@ function bubbleView(b: Bubble, tz: string) {
     const tags = [b.intent ? esc(b.intent) : "", b.parser === "model" ? "read by AI" : ""].filter(Boolean).join(" · ");
     return `<div class="b in">${text}<div class="meta">${tags ? `<span>${tags}</span>` : ""}<span>${time}</span></div></div>`;
   }
+  if (b.dir === "owner") {
+    const text = b.text ? esc(b.text) : `<i>${esc(MEDIA_LABEL[b.type] ?? b.type)}</i>`;
+    return `<div class="b out">${text}<div class="meta"><span>you, in the app</span><span>${time}</span></div></div>`;
+  }
   const m = b.msg;
   const extra =
     m.kind === "buttons"

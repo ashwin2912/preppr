@@ -1,5 +1,5 @@
 import { and, desc, eq, lt } from "drizzle-orm";
-import { menus, messages, orders, type Customer, type Menu, type Order, type OrderLine } from "../db/schema";
+import { customers, menus, messages, orders, type Customer, type Menu, type Order, type OrderLine } from "../db/schema";
 import type { Ctx } from "../ctx";
 import { currentMenu, formatMenuForCustomer, ordersOpen } from "../domain/menu";
 import { formatLines, money, orderTotal, priceLines, remapLines, toSimple } from "../domain/order";
@@ -137,6 +137,65 @@ async function handleButton(ctx: Ctx, msg: Incoming, customer: Customer, replyId
     `You're in! ✅ Delivery to ${customer.area ?? "you"} ${dayPhrase(menu, ctx)}.\nTo change or cancel, just message me before ${formatClock(menu.cutoffAt, ctx.cfg.tz)}.` +
       (b.owedCents > 0 ? `\n\n${balanceText(b)}` : ""),
   );
+  await askMenuOptIn(ctx, customer);
+}
+
+const OPT_OUT = /^\s*(stop|unsubscribe)\s*$/i;
+
+/**
+ * Daily "ordering is open" message (coexistence menu push): the opt-in
+ * buttons, the template's See menu / Skip today buttons, and STOP. Returns
+ * true when the message was handled here.
+ */
+async function handleMenuOptIn(ctx: Ctx, msg: Incoming, customer: Customer): Promise<boolean> {
+  const phone = customer.phone;
+  const setOptIn = (on: boolean) =>
+    ctx.db.update(customers).set({ menuOptIn: on, menuOptInAt: ctx.now(), updatedAt: ctx.now() }).where(eq(customers.phone, phone));
+  const [kind] = (msg.replyId ?? "").split(":");
+  if (kind === "optin_yes" || kind === "optin_no") {
+    await tagIntent(ctx, msg.id, kind);
+    await setOptIn(kind === "optin_yes");
+    await sendText(ctx, phone, kind === "optin_yes" ? "Done 👍 We'll message you when ordering opens. Reply STOP any time to turn it off." : "No problem, we won't send it.");
+    return true;
+  }
+  if (kind === "menu_skip") {
+    await tagIntent(ctx, msg.id, "menu_skip");
+    await sendText(ctx, phone, "No problem 👍 See you next time!");
+    return true;
+  }
+  if (kind === "menu_see") {
+    await tagIntent(ctx, msg.id, "menu");
+    const menu = await currentMenu(ctx.db, ctx.now(), ctx.cfg.tz);
+    if (menu && ordersOpen(menu, ctx.now())) await sendMenu(ctx, phone, menu);
+    else await closedReply(ctx, phone);
+    return true;
+  }
+  if (ctx.cfg.coexistence && !msg.replyId && OPT_OUT.test(msg.text)) {
+    await tagIntent(ctx, msg.id, "opt_out");
+    await setOptIn(false);
+    await sendText(ctx, phone, "OK, no more daily messages. You can still order here any time. Reply START to turn them back on.");
+    return true;
+  }
+  if (ctx.cfg.coexistence && !msg.replyId && /^\s*start\s*$/i.test(msg.text) && customer.menuOptIn === false) {
+    await setOptIn(true); // and fall through: START also shows the menu
+    await sendText(ctx, phone, "Daily messages are back on 👍");
+  }
+  return false;
+}
+
+/** Asked once, after a customer's first confirmed order, on a shared number. */
+async function askMenuOptIn(ctx: Ctx, customer: Customer) {
+  if (!ctx.cfg.coexistence || customer.menuOptIn !== null || customer.menuOptInAskedAt) return;
+  await ctx.db.update(customers).set({ menuOptInAskedAt: ctx.now() }).where(eq(customers.phone, customer.phone));
+  await send(ctx, {
+    kind: "buttons",
+    to: customer.phone,
+    body: `Want a message from ${ctx.cfg.kitchenName} each day when ordering opens?`,
+    buttons: [
+      { id: "optin_yes", title: "Yes please" },
+      { id: "optin_no", title: "No thanks" },
+    ],
+  });
 }
 
 async function answerQuestion(ctx: Ctx, msg: Incoming, customer: Customer, menu: Menu | null, it: Interpretation) {
@@ -168,6 +227,7 @@ export async function handleCustomer(ctx: Ctx, msg: Incoming, customer: Customer
     await handleButton(ctx, msg, customer, msg.replyId);
     return;
   }
+  if (await handleMenuOptIn(ctx, msg, customer)) return;
 
   const text = msg.text.trim();
   if (!text) {

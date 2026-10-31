@@ -114,10 +114,10 @@ export class FakeLlm implements Llm {
 let msgSeq = 0;
 
 export async function harness(
-  opts: { start?: Date; llm?: Llm; printOutbound?: boolean; db?: DB; concurrency?: number; sheets?: SheetSink } = {},
+  opts: { start?: Date; llm?: Llm; printOutbound?: boolean; db?: DB; concurrency?: number; sheets?: SheetSink; env?: Record<string, string> } = {},
 ) {
   const start = opts.start ?? new Date("2026-10-19T12:00:00Z"); // Mon 8:00 AM ET
-  const cfg = loadConfig(testEnv as unknown as NodeJS.ProcessEnv);
+  const cfg = loadConfig({ ...testEnv, ...opts.env } as unknown as NodeJS.ProcessEnv);
   const db: DB = opts.db ?? (await connectPglite());
   const wa = new DryRunWaClient(opts.printOutbound ?? false);
   const fake = new FakeLlm();
@@ -127,7 +127,7 @@ export async function harness(
   // One row at a time: PGlite is a single connection, and it keeps tests deterministic.
   const { app, drain, worker } = createApp(deps, { concurrency: opts.concurrency ?? 1 });
 
-  type In = string | { replyId: string; title?: string } | { type: "audio" | "image" };
+  type In = string | { replyId: string; title?: string } | { templateButton: string; title?: string } | { type: "audio" | "image" };
 
   async function post(body: unknown, signature?: string) {
     const raw = JSON.stringify(body);
@@ -148,12 +148,28 @@ export async function harness(
         type: "interactive",
         interactive: { type: "button_reply", button_reply: { id: input.replyId, title: input.title ?? input.replyId } },
       };
+    else if ("templateButton" in input) message = { ...base, type: "button", button: { payload: input.templateButton, text: input.title ?? input.templateButton } };
     else message = { ...base, type: input.type, [input.type]: { id: "media-1", mime_type: "audio/ogg" } };
     return {
       object: "whatsapp_business_account",
       entry: [{ id: "waba", changes: [{ field: "messages", value: { messaging_product: "whatsapp", messages: [message] } }] }],
     };
   }
+
+  /** A webhook with one change of any field (coexistence: echoes, history, contact sync). */
+  async function postChange(field: string, value: Record<string, unknown>): Promise<Outbound[]> {
+    const before = wa.sent.length;
+    const res = await post({ object: "whatsapp_business_account", entry: [{ id: "waba", changes: [{ field, value: { messaging_product: "whatsapp", ...value } }] }] });
+    if (res.status !== 200) throw new Error(`webhook ${res.status}`);
+    await drain();
+    return wa.sent.slice(before);
+  }
+
+  /** The owner typed `text` to `to` in the WhatsApp Business app. */
+  const echo = (to: string, text: string, id = `wamid.echo.${++msgSeq}`) =>
+    postChange("smb_message_echoes", {
+      message_echoes: [{ id, from: BOT.replace("+", ""), to: to.replace("+", ""), timestamp: String(Math.floor(clock.now.getTime() / 1000)), type: "text", text: { body: text } }],
+    });
 
   /** Send one inbound message and return everything the bot sent in response. */
   async function say(from: string, input: In, id?: string): Promise<Outbound[]> {
@@ -183,5 +199,5 @@ export async function harness(
     return say(phone, address);
   }
 
-  return { cfg, db, wa, llm: fake, clock, app, drain, worker, post, payload, say, texts, advance, buttonsOf, publishMenu, onboard };
+  return { cfg, db, wa, llm: fake, clock, app, drain, worker, post, payload, say, postChange, echo, texts, advance, buttonsOf, publishMenu, onboard };
 }

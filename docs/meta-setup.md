@@ -30,7 +30,7 @@ flowchart TD
 | Owner's existing number | WhatsApp Business app on the owner's phone | Daily broadcast lists, manual chats. **Do not** connect it to the API. |
 | New bot number | WhatsApp Cloud API (this guide) | All customer ordering, owner commands |
 
-**Do not use "coexistence"** (the same number on the Business app and the API). It disables broadcast lists, which the daily menu push depends on.
+To run the bot on the owner's existing number instead ("coexistence": the same number on the Business app and the API), follow [`coexistence-setup.md`](coexistence-setup.md). It disables broadcast lists, so the bot sends the daily menu itself.
 
 ---
 
