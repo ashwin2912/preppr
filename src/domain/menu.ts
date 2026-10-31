@@ -9,11 +9,8 @@ import { money } from "./order";
 
 export type BuiltMenu = { date: string; cutoffAt: Date; items: MenuItem[]; cutoffWasDefault: boolean };
 
-/** Parsed LLM output -> clean menu with stable ids, real date and cutoff instant. */
-export function buildMenu(parsed: ParsedMenu, now: Date, cfg: Config): BuiltMenu {
-  const date = resolveMenuDate(parsed.day, now, cfg.tz);
-  const parsedCutoff = parsed.cutoff ? parseClock(parsed.cutoff) : null;
-  const cutoff = parsedCutoff ?? parseClock(cfg.cutoffTime)!;
+/** Parsed LLM items -> clean menu items with stable ids; drops unnamed or unpriced items. */
+export function menuItemsFrom(parsed: ParsedMenu): MenuItem[] {
   const items: MenuItem[] = [];
   for (const it of parsed.items) {
     const name = it.name.trim();
@@ -21,7 +18,15 @@ export function buildMenu(parsed: ParsedMenu, now: Date, cfg: Config): BuiltMenu
     const aliases = [...new Set([name.toLowerCase(), ...it.aliases.map((a) => a.trim().toLowerCase())])].filter(Boolean);
     items.push({ id: `i${items.length + 1}`, name, price_cents: it.price_cents, aliases });
   }
-  return { date, cutoffAt: zonedInstant(date, cutoff, cfg.tz), items, cutoffWasDefault: !parsedCutoff };
+  return items;
+}
+
+/** Parsed LLM output -> clean menu with stable ids, real date and cutoff instant. */
+export function buildMenu(parsed: ParsedMenu, now: Date, cfg: Config): BuiltMenu {
+  const date = resolveMenuDate(parsed.day, now, cfg.tz);
+  const parsedCutoff = parsed.cutoff ? parseClock(parsed.cutoff) : null;
+  const cutoff = parsedCutoff ?? parseClock(cfg.cutoffTime)!;
+  return { date, cutoffAt: zonedInstant(date, cutoff, cfg.tz), items: menuItemsFrom(parsed), cutoffWasDefault: !parsedCutoff };
 }
 
 const itemList = (items: MenuItem[]) => items.map((i) => `• ${i.name} — ${money(i.price_cents)}`).join("\n");

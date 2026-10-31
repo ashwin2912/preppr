@@ -15,6 +15,7 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "import:customers": "tsx scripts/import-customers.ts",
     "import:chat-export": "tsx scripts/import-chat-export.ts",
+    "orders:from-export": "tsx scripts/orders-from-export.ts",
     "simulate": "tsx scripts/simulate.ts",
     "wa:sync": "tsx scripts/wa-sync.ts"
   },

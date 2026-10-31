@@ -4,3 +4,4 @@ dist
 *.csv
 !test/fixtures/*.csv
 secrets/
+exports/
