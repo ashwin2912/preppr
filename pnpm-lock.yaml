@@ -51,6 +51,9 @@ importers:
       '@types/pg':
         specifier: ^8.23.1
         version: 8.23.1
+      bun:
+        specifier: 1.3.1
+        version: 1.3.1
       drizzle-kit:
         specifier: ^0.31.11
         version: 0.31.11
@@ -568,6 +571,61 @@ packages:
   '@opentelemetry/api@1.9.1':
     resolution: {integrity: sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q==}
     engines: {node: '>=8.0.0'}
+
+  '@oven/bun-darwin-aarch64@1.3.1':
+    resolution: {integrity: sha512-7Rap1BHNWqgnexc4wLjjdZeVRQKtk534iGuJ7qZ42i/q1B+cxJZ6zSnrFsYmo+zreH7dUyUXL3AHuXGrl2772Q==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@oven/bun-darwin-x64-baseline@1.3.1':
+    resolution: {integrity: sha512-mJo715WvwEHmJ6khNymWyxi0QrFzU94wolsUmxolViNHrk+2ugzIkVIJhTnxf7pHnarxxHwyJ/kgatuV//QILQ==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@oven/bun-darwin-x64@1.3.1':
+    resolution: {integrity: sha512-wpqmgT/8w+tEr5YMGt1u1sEAMRHhyA2SKZddC6GCPasHxSqkCWOPQvYIHIApnTsoSsxhxP0x6Cpe93+4c7hq/w==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@oven/bun-linux-aarch64-musl@1.3.1':
+    resolution: {integrity: sha512-gKU3Wv3BTG5VMjqMMnRwqU6tipCveE9oyYNt62efy6cQK3Vo1DOBwY2SmjbFw+yzj+Um20YoFOLGxghfQET4Ng==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@oven/bun-linux-aarch64@1.3.1':
+    resolution: {integrity: sha512-ACn038SZL8del+sFnqCjf+haGB02//j2Ez491IMmPTvbv4a/D0iiNz9xiIB3ICbQd3EwQzi+Ut/om3Ba/KoHbQ==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@oven/bun-linux-x64-baseline@1.3.1':
+    resolution: {integrity: sha512-7+2aCrL81mtltZQbKdiPB58UL+Gr3DAIuPyUAKm0Ib/KG/Z8t7nD/eSMRY/q6b+NsAjYnVPiPwqSjC3edpMmmQ==}
+    cpu: [x64]
+    os: [linux]
+
+  '@oven/bun-linux-x64-musl-baseline@1.3.1':
+    resolution: {integrity: sha512-tP0WWcAqrMayvkggOHBGBoyyoK+QHAqgRUyj1F6x5/udiqc9vCXmIt1tlydxYV/NvyvUAmJ7MWT0af44Xm2kJw==}
+    cpu: [x64]
+    os: [linux]
+
+  '@oven/bun-linux-x64-musl@1.3.1':
+    resolution: {integrity: sha512-8AgEAHyuJ5Jm9MUo1L53K1SRYu0bNGqV0E0L5rB5DjkteO4GXrnWGBT8qsuwuy7WMuCMY3bj64/pFjlRkZuiXw==}
+    cpu: [x64]
+    os: [linux]
+
+  '@oven/bun-linux-x64@1.3.1':
+    resolution: {integrity: sha512-cAUeM3I5CIYlu5Ur52eCOGg9yfqibQd4lzt9G1/rA0ajqcnCBaTuekhUDZETJJf5H9QV+Gm46CqQg2DpdJzJsw==}
+    cpu: [x64]
+    os: [linux]
+
+  '@oven/bun-windows-x64-baseline@1.3.1':
+    resolution: {integrity: sha512-dcA+Kj7hGFrY3G8NWyYf3Lj3/GMViknpttWUf5pI6p6RphltZaoDu0lY5Lr71PkMdRZTwL2NnZopa/x/NWCdKA==}
+    cpu: [x64]
+    os: [win32]
+
+  '@oven/bun-windows-x64@1.3.1':
+    resolution: {integrity: sha512-xdUjOZRq6PwPbbz4/F2QEMLBZwintGp7AS50cWxgkHnyp7Omz5eJfV6/vWtN4qwZIyR3V3DT/2oXsY1+7p3rtg==}
+    cpu: [x64]
+    os: [win32]
 
   '@oxc-parser/binding-android-arm-eabi@0.152.0':
     resolution: {integrity: sha512-393VtirINkae4XHBTkq/yQxhOwEr4V+r0et37P2fp+sYZSdYgZTRDPo5Um8vBh0QjMZ+RmaMy4PP0qwr4cTMwA==}
@@ -1119,6 +1177,12 @@ packages:
 
   buffer-from@1.1.2:
     resolution: {integrity: sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ==}
+
+  bun@1.3.1:
+    resolution: {integrity: sha512-enqkEb0RhNOgDzHQwv7uvnIhX3uSzmKzz779dL7kdH8SauyTdQvCz4O1UT2rU0UldQp2K9OlrJNdyDHayPEIvw==}
+    cpu: [arm64, x64]
+    os: [darwin, linux, win32]
+    hasBin: true
 
   bundle-require@5.1.0:
     resolution: {integrity: sha512-3WrrOuZiyaaZPWiEt4G3+IffISVC9HYlWueJEBWED4ZH4aIAC2PnkdnuRrR94M+w6yGWn4AglWtJtBI8YqvgoA==}
@@ -2040,6 +2104,39 @@ snapshots:
 
   '@opentelemetry/api@1.9.1': {}
 
+  '@oven/bun-darwin-aarch64@1.3.1':
+    optional: true
+
+  '@oven/bun-darwin-x64-baseline@1.3.1':
+    optional: true
+
+  '@oven/bun-darwin-x64@1.3.1':
+    optional: true
+
+  '@oven/bun-linux-aarch64-musl@1.3.1':
+    optional: true
+
+  '@oven/bun-linux-aarch64@1.3.1':
+    optional: true
+
+  '@oven/bun-linux-x64-baseline@1.3.1':
+    optional: true
+
+  '@oven/bun-linux-x64-musl-baseline@1.3.1':
+    optional: true
+
+  '@oven/bun-linux-x64-musl@1.3.1':
+    optional: true
+
+  '@oven/bun-linux-x64@1.3.1':
+    optional: true
+
+  '@oven/bun-windows-x64-baseline@1.3.1':
+    optional: true
+
+  '@oven/bun-windows-x64@1.3.1':
+    optional: true
+
   '@oxc-parser/binding-android-arm-eabi@0.152.0':
     optional: true
 
@@ -2376,6 +2473,20 @@ snapshots:
       balanced-match: 4.0.4
 
   buffer-from@1.1.2: {}
+
+  bun@1.3.1:
+    optionalDependencies:
+      '@oven/bun-darwin-aarch64': 1.3.1
+      '@oven/bun-darwin-x64': 1.3.1
+      '@oven/bun-darwin-x64-baseline': 1.3.1
+      '@oven/bun-linux-aarch64': 1.3.1
+      '@oven/bun-linux-aarch64-musl': 1.3.1
+      '@oven/bun-linux-x64': 1.3.1
+      '@oven/bun-linux-x64-baseline': 1.3.1
+      '@oven/bun-linux-x64-musl': 1.3.1
+      '@oven/bun-linux-x64-musl-baseline': 1.3.1
+      '@oven/bun-windows-x64': 1.3.1
+      '@oven/bun-windows-x64-baseline': 1.3.1
 
   bundle-require@5.1.0(esbuild@0.28.2):
     dependencies:

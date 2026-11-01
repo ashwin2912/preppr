@@ -15,6 +15,8 @@ pnpm dev             # local server; no DATABASE_URL = in-memory PGlite (data lo
 pnpm db:generate     # after editing src/db/schema.ts; commit the new drizzle/ files
 pnpm import:customers <contacts.vcf|customers.csv> [--dry-run]
 pnpm import:chat-export <file.txt|folder> [--fixtures out.json]
+pnpm orders:from-backup [--check] [--backup dir] [--date d] [--no-open]  # orders from an iPhone backup (dev run)
+pnpm build:mac       # bun --compile → dist/preppr-orders-{arm64,x64} (single-file Mac tool, ad-hoc signed)
 pnpm wa:sync         # coexistence only: request contacts + chat history from Meta, within 24 h of onboarding
 ```
 
@@ -32,6 +34,7 @@ Before committing: `pnpm typecheck && pnpm test && pnpm build`. The default `.en
 - `src/flows/payments.ts`, `src/domain/ledger.ts`: balance = confirmed orders − verified payments.
 - `src/flows/onboarding.ts`: only for unknown numbers (`needsOnboarding = !customer`).
 - `src/jobs/cutoff.ts`, `watchdog.ts`, `sheetSync.ts`; `src/sheets/client.ts` (Sheets REST + service-account JWT, no SDK).
+- `src/backup/*` + `scripts/backup-orders.ts`: Mac tool `preppr-orders` (docs/backup-orders.md). Reads WhatsApp Business chats from the owner's iPhone backup (decrypts with node:crypto, bplist parser, `sqlite.ts` = bun:sqlite or node:sqlite), feeds `src/domain/exportOrders.ts` (`OrderInput` → `extractFromInputs`, shared with chat exports), writes CSVs. Keep it free of db/flows imports so the Bun binary stays small. Installer: `deploy/mac/install.sh`.
 - `src/admin/*`: read-only chat viewer behind an HMAC link from the CHATS command.
 - `src/db/schema.ts`: Drizzle schema; migrations in `drizzle/` run at startup.
 
@@ -50,6 +53,7 @@ Before committing: `pnpm typecheck && pnpm test && pnpm build`. The default `.en
 
 ## Docs
 
+- `docs/backup-orders.md`: Mac tool for orders from the iPhone backup: owner steps, hosting, `--check`, troubleshooting.
 - `docs/pilot-cloudflare.md`: pilot on one machine (laptop now, VPS later): `deploy/pilot/` has the Compose file (app + cloudflared) and the cutoff cron Worker.
 - `docs/deployment-plan.md`: how to deploy one kitchen, and how to productize for many.
 - `docs/production-readiness.md`: launch checklist and status.
@@ -70,6 +74,7 @@ Before committing: `pnpm typecheck && pnpm test && pnpm build`. The default `.en
 
 ## Open items
 
+- `preppr-orders` (iPhone backup tool) tested only on a synthetic backup; confirm domain, ChatStorage columns, `@lid` share and message types with `--check` on the owner's Mac. Binaries need a public host (`PREPPR_BASE_URL` in `deploy/mac/install.sh`).
 - Parser not yet evaluated on real customer messages (collect with `pnpm import:chat-export --fixtures`, or from the coexistence history sync: `messages.source = 'history'`).
 - Coexistence webhook payload shapes (`message_echoes`, `history`, `state_sync`) are from Meta/BSP docs, parsed loosely; check them against real payloads on onboarding day.
 - Not yet deployed with a permanent database; the Sheet and Sentry integrations are tested only against fakes/mocks.
