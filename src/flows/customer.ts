@@ -2,7 +2,7 @@ import { and, desc, eq, lt } from "drizzle-orm";
 import { customers, menus, messages, orders, type Customer, type Menu, type Order, type OrderLine } from "../db/schema";
 import type { Ctx } from "../ctx";
 import { currentMenu, formatMenuForCustomer, ordersOpen } from "../domain/menu";
-import { formatLines, money, orderTotal, priceLines, remapLines, toSimple } from "../domain/order";
+import { CONFIDENCE_MIN, formatLines, money, orderTotal, priceLines, remapLines, toSimple } from "../domain/order";
 import { log } from "../lib/log";
 import { formatClock, formatDay, localDate } from "../lib/time";
 import { ruleInterpret } from "../llm/rules";
@@ -14,7 +14,7 @@ import { forwardToOwner, handoff } from "./handoff";
 import { answerBalance, balanceText, handlePaymentReport } from "./payments";
 import { type ConvState, clearState, setState, tagIntent } from "./state";
 
-export const CONFIDENCE_MIN = 0.8;
+export { CONFIDENCE_MIN } from "../domain/order";
 const MAX_CLARIFY = 1;
 
 const dayPhrase = (m: Menu, ctx: Ctx) =>

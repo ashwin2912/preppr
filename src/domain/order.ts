@@ -3,6 +3,9 @@ import type { SimpleLine } from "../llm/types";
 
 export const MAX_QTY = 50;
 
+/** Below this the parser's answer is treated as unsure (bot asks; exports flag for a check). */
+export const CONFIDENCE_MIN = 0.8;
+
 export const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 export const orderTotal = (lines: OrderLine[]) => lines.reduce((s, l) => s + l.qty * l.unit_cents, 0);
