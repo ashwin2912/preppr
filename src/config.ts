@@ -44,6 +44,8 @@ const EnvSchema = z.object({
   ADMIN_SECRET: z.string().optional(),
   GOOGLE_SERVICE_ACCOUNT_JSON: z.string().optional(),
   SHEET_ID: z.string().optional(),
+  META_APP_ID: z.string().optional(),
+  ES_CONFIG_ID: z.string().optional(),
 });
 
 export type Config = {
@@ -93,6 +95,9 @@ export type Config = {
   /** Both set = Google Sheet sync on. */
   googleServiceAccountJson?: string;
   sheetId?: string;
+  /** Embedded Signup (coexistence onboarding page): Meta app id and Facebook Login for Business configuration id. */
+  metaAppId?: string;
+  esConfigId?: string;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -145,5 +150,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     adminSecret: e.ADMIN_SECRET || undefined,
     googleServiceAccountJson: e.GOOGLE_SERVICE_ACCOUNT_JSON || undefined,
     sheetId: e.SHEET_ID || undefined,
+    metaAppId: e.META_APP_ID || undefined,
+    esConfigId: e.ES_CONFIG_ID || undefined,
   };
 }
