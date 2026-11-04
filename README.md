@@ -12,6 +12,8 @@ Built for a home-style tiffin service doing ~500 orders a day on the official Wh
 - **Safe by default:** webhook signature check, idempotent message handling, per-customer locking, replies only inside WhatsApp's free 24-hour window.
 - **Any model:** Claude by default; any OpenAI-compatible API (OpenRouter, Hugging Face, Ollama) for testing.
 
+- **Orders without the bot:** `preppr-orders`, a one-file Mac tool, reads the day's orders from the WhatsApp Business chats in the owner's iPhone backup and writes a spreadsheet. See [Orders from the iPhone backup](#orders-from-the-iphone-backup-mac).
+
 Roadmap: thermal-printed route sheets, sales history, and prep forecasting.
 
 ## How it works
@@ -36,6 +38,20 @@ Payments: customers can just say "paid $20 on zelle". The bot records it as **to
 
 Customers who still reply to the owner's business number out of habit are handled by the owner by hand (a quick reply pointing them to the link). The bot has no involvement there.
 
+## Orders from the iPhone backup (Mac)
+
+For a kitchen that isn't on the bot yet (or as a fallback), `preppr-orders` reads the day's orders straight from WhatsApp Business on the owner's iPhone, using the backup Finder makes on their Mac. The owner backs up the phone after cutoff and double-clicks **Get today's orders** on the Desktop; the day's CSV opens.
+
+- **One file, nothing to install:** compiled with `bun build --compile` for Apple silicon and Intel (`pnpm build:mac`). `deploy/mac/install.sh` installs it with one `curl … | bash` line: no Homebrew, no admin password. It also saves the backup password in the macOS Keychain (typed into Apple's own hidden prompt) and adds the Desktop launcher.
+- **Encrypted backups:** decrypted with `node:crypto` only (keybag, PBKDF2, RFC 3394 key unwrap, AES-256-CBC), into a private temp folder that is deleted afterwards. The backup itself is never changed.
+- **Same order reading as the bot:** finds the day's menu (the owner's priced message seen in the most chats), reads each customer's messages with the rules parser first and the model second, and prices them from the menu in code. 1:1 chats and each group member count as separate customers, keyed by phone number. Members whose number WhatsApp hides (`@lid`) are listed by name and marked "check".
+- **Output** in `~/Desktop/Orders`: `Orders YYYY-MM-DD.csv` (one row per phone, a column per dish, total, status ok / check / cancelled, reasons, messages) and `All orders.csv`, where a re-run replaces that day's rows.
+- **`--check`:** a read-only probe for the first visit. It prints only counts (backup date, encryption, WhatsApp domains, database layout, messages per day), never text, names or numbers.
+
+The model key goes in `~/.preppr/config.env`. Owner steps, hosting and troubleshooting are in [docs/backup-orders.md](docs/backup-orders.md). Tested on a synthetic backup only; the WhatsApp domain and table layout still need confirming with `--check` on a real one.
+
+There is also an agent-run version of the same steps as a Codex skill: [deploy/codex/whatsapp-orders/SKILL.md](deploy/codex/whatsapp-orders/SKILL.md).
+
 ## Develop
 
 ```sh
@@ -44,6 +60,9 @@ pnpm test            # flows + unit tests (in-memory Postgres, fake WhatsApp, fa
 pnpm simulate        # prints a full simulated day; uses a real model if one is configured
 pnpm test:parser     # ~30 realistic messages against the configured model
 pnpm dev             # local server; without DATABASE_URL it uses in-memory PGlite
+pnpm orders:from-export <file.txt|folder>   # orders from WhatsApp "Export chat" files
+pnpm orders:from-backup --backup <dir> --no-open   # orders from an iPhone backup (dev run of preppr-orders)
+pnpm build:mac       # dist/preppr-orders-arm64 and -x64 (Bun is a dev dependency)
 ```
 
 Copy `.env.example` to `.env` and fill it in. The server, `simulate` and `test:parser` read `.env` automatically; variables set in the shell win.
@@ -96,6 +115,7 @@ CSV header: `phone,name,area,address_note` (optional extra column `notes`). Phon
 
 ## Docs
 
+- [docs/backup-orders.md](docs/backup-orders.md): the Mac tool for orders from the iPhone backup: owner steps, hosting the binaries, `--check`, troubleshooting.
 - [docs/pilot-cloudflare.md](docs/pilot-cloudflare.md): pilot deploy on one machine (laptop or VPS) with Docker, a Cloudflare tunnel and a Cloudflare cron Worker.
 - [docs/deployment-plan.md](docs/deployment-plan.md): deploying one kitchen, then many; productizing (multi-tenant, Embedded Signup, billing).
 - [docs/meta-setup.md](docs/meta-setup.md): WhatsApp Cloud API setup, step by step. Start business verification early; it takes days.
@@ -157,13 +177,23 @@ src/jobs/watchdog.ts    alerts: no menu, late summary, stuck queue, unverified p
 src/jobs/sheetSync.ts   DB → Google Sheet (src/sheets/client.ts: REST + service account)
 src/jobs/cutoff.ts      close menus, send summary once
 src/domain/*            menu/order/summary formatting and math, CSV import
+src/domain/exportOrders.ts  orders from chat messages (exports, iPhone backup): menu detection, per-customer reading, CSVs
+src/backup/*            iPhone backup reader for preppr-orders: plist, crypto, sqlite adapter, WhatsApp DB, run
+src/signup/routes.ts    Embedded Signup page for coexistence onboarding (not wired into app.ts yet)
+scripts/backup-orders.ts  preppr-orders entry point
+deploy/mac/install.sh   one-line Mac installer for preppr-orders
 src/llm/anthropic.ts    Claude prompts (structured outputs)
 src/wa/*                Graph API client, signature check, guarded send
 ```
 
 ## Status
 
-Working MVP: tested end to end on Meta's test number, not yet in production. What's left before launch is tracked in [docs/production-readiness.md](docs/production-readiness.md).
+Working MVP: tested end to end on Meta's test number, not yet in production.
+
+Recent work:
+- `preppr-orders` (Mac, iPhone backup → orders CSV): built, tested on a synthetic plain and encrypted backup, binary run end to end with a stand-in model. Not yet run on the owner's real backup; binaries still need a public host (`PREPPR_BASE_URL` in `deploy/mac/install.sh`).
+- Chat exports and the iPhone backup now share one order pipeline (`OrderInput` → `extractFromInputs` in `src/domain/exportOrders.ts`).
+- Embedded Signup for coexistence onboarding: routes and config (`META_APP_ID`, `ES_CONFIG_ID`) written, not yet wired into the app. What's left before launch is tracked in [docs/production-readiness.md](docs/production-readiness.md).
 
 ## License
 
