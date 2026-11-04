@@ -21,7 +21,8 @@ Everything the bot depends on is a link in a chain: WhatsApp Cloud API, the host
 
 ## 2. Blockers: can't launch without these
 
-- [ ] **Meta setup.** Business verification, the real bot number, display name approval, a permanent token, and the webhook. Verification takes days, so start first. Step by step: [meta-setup.md](./meta-setup.md).
+- [ ] **Meta setup.** Business verification, a permanent token, and the webhook (with the coexistence fields). Verification takes days, so start first. Step by step: [meta-setup.md](./meta-setup.md).
+- [ ] **Coexistence onboarding** of the owner's number: choose Tech Provider (Embedded Signup page) or BSP, get the `daily_order_open` utility template approved, onboard, `pnpm wa:sync` within 24 h, coexistence smoke test. See [coexistence-setup.md](./coexistence-setup.md).
 - [ ] **End-to-end run on Meta's test number** with 3–5 real phones, following the brief's "done when" checklist: owner publishes, new customer onboards, ~10 varied orders, Confirm buttons, handoff, late order, cutoff summary.
 - [ ] **Real parser evaluation.** Get ~100 anonymized order messages from the owner's past 1:1 chats. Put them in `test/fixtures/orders.json` and run `pnpm test:parser` (Claude, or any model set via `LLM_PROVIDER`; see the README). Until this runs, parser accuracy is unknown.
 - [ ] **Permanent database.** Neon (managed, with backups and point-in-time restore) or a local Postgres with nightly `pg_dump` off the machine. Never run production without `DATABASE_URL`: the in-memory fallback loses everything on restart.
@@ -86,7 +87,7 @@ Simulate ~50 customers messaging within 1–2 minutes of the broadcast against a
 ## 4. Operations
 
 - [ ] **Pilot:** one area, 20–30 customers, for one week. The owner keeps accepting manual orders as a backup. Compare the cutoff summary to what the owner would have written by hand.
-- [ ] **Fallback plan:** if the bot is down during the window, the owner sends a broadcast: "Bot is down — reply to this number with your order today." Write this message in advance.
+- [ ] **Fallback plan:** if the bot is down during the window, customers are still in the owner's normal chat, so the owner takes orders by hand in the Business app. Write a short quick reply for it in advance.
 - [x] **Runbook:** in [monitoring.md](./monitoring.md#runbook). Add who to call.
 - [ ] **Secrets:** `WA_TOKEN`, `WA_APP_SECRET`, `ANTHROPIC_API_KEY`, `DATABASE_URL`, `JOB_SECRET` live in Secret Manager (Cloud Run) or in a `.env` on an encrypted disk (laptop). They are never committed.
 

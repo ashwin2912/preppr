@@ -68,15 +68,15 @@ Equally valid alternatives that run the same Docker image: Fly.io or Railway (si
 |---|---|---|---|
 | local | PGlite (in memory) or a Neon dev branch | `WA_DRY_RUN=1` | `pnpm dev`, `pnpm simulate` |
 | staging | Neon branch `staging` | Meta **test number**, test phones | Every merge to `main` deploys here; end-to-end checks |
-| production | Neon `main` | Real bot number | Deployed from a tag or release |
+| production | Neon `main` | Owner's business number (coexistence) | Deployed from a tag or release |
 
 ### First production deploy, step by step
 
-1. **Meta** (`meta-setup.md`): business verification, bot number, display name, permanent system-user token, webhook verify token, app secret. Start first; verification takes days.
+1. **Meta** (`meta-setup.md` steps 1–3, 5, 7): business verification, app, permanent system-user token, webhook verify token, app secret. Start first; verification takes days. Then onboard the owner's number with coexistence (`coexistence-setup.md`) and submit the `daily_order_open` utility template.
 2. **Database**: create the Neon project; copy the pooled connection string as `DATABASE_URL`.
 3. **Secrets** in Secret Manager: `WA_TOKEN`, `WA_APP_SECRET`, `ANTHROPIC_API_KEY`, `DATABASE_URL`, `JOB_SECRET`, `ADMIN_SECRET`, `SENTRY_DSN`, `GOOGLE_SERVICE_ACCOUNT_JSON`.
-4. **Deploy**: `gcloud run deploy` (README "Deploy"). Plain env vars: `TZ`, `AREAS`, `OWNER_NUMBERS`, `BOT_NUMBER`, `WA_PHONE_NUMBER_ID`, `WA_VERIFY_TOKEN`, `KITCHEN_NAME`, `PAYMENT_INSTRUCTIONS`, `PUBLIC_URL`, `SHEET_ID`, `KITCHEN_DAYS`, `MENU_EXPECTED_BY`.
-5. **Webhook**: in the Meta app, set the callback to `https://<service>/webhook` with the verify token, and subscribe to `messages`.
+4. **Deploy**: `gcloud run deploy` (README "Deploy"). Plain env vars: `WA_COEXISTENCE=1`, `TZ`, `AREAS`, `OWNER_NUMBERS` (personal number), `BOT_NUMBER` (business number), `WA_PHONE_NUMBER_ID`, `WA_VERIFY_TOKEN`, `KITCHEN_NAME`, `PAYMENT_INSTRUCTIONS`, `PUBLIC_URL`, `SHEET_ID`, `KITCHEN_DAYS`, `MENU_EXPECTED_BY`.
+5. **Webhook**: in the Meta app, set the callback to `https://<service>/webhook` with the verify token, and subscribe to `messages`, `smb_message_echoes`, `history` and `smb_app_state_sync`. Within 24 h of onboarding, run `pnpm wa:sync`.
 6. **Scheduler**: create the cutoff job (README).
 7. **Monitoring**: UptimeRobot on `/readyz`; Sentry alert rules (`monitoring.md`).
 8. **Seed customers**: the owner shares contacts with the bot, or `pnpm import:customers contacts.vcf`.
@@ -153,9 +153,8 @@ Isolation: every query takes a kitchen id, enforced in a small data-access layer
 - **Become a Meta Tech Provider** (or work through a Solution Partner/BSP such as 360dialog or Twilio, trading margin for less paperwork). This allows **Embedded Signup**: a kitchen clicks "Connect WhatsApp" on your site, logs in with Facebook, picks or creates its own WhatsApp Business Account and number, and you get a token for it.
 - Each kitchen then owns its own business portfolio and number; display name approval and messaging limits are per kitchen.
 - **Number choice per kitchen:**
-  - (a) A new dedicated bot number (today's model; keeps broadcast lists on the owner's app).
-  - (b) **Coexistence** on the owner's existing number. One number, full chat and contact sync, but broadcast lists are disabled, so the menu broadcast needs a replacement: Status, groups, or paid marketing templates.
-  - The first kitchen uses (b) (owner wants customers to stay in the existing chat); the menu push is a utility template, see `coexistence-setup.md`. Offer both.
+  - **Coexistence on the owner's existing number is the default** (decided 2026-10-28, first kitchen). One number, full chat and contact sync; broadcast lists are disabled, so the bot pushes the menu (in-window text or a utility template) to opted-in customers. See `coexistence-setup.md`.
+  - A separate dedicated bot number stays possible (`WA_COEXISTENCE` off) for a kitchen that wants to keep broadcast lists, but isn't offered by default.
 - **Message templates** become worth adding: "menu is out" to opted-in customers, balance reminders, and a summary that always reaches the owner. These are paid per message (Utility/Marketing pricing per country); pass the cost through or include a monthly allowance.
 
 ### 5.3 Kitchen sign-up flow (product)
@@ -165,7 +164,7 @@ Isolation: every query takes a kitchen id, enforced in a small data-access layer
 3. Add regulars: share contacts to the bot, upload a `.vcf`, or skip.
 4. Optional: connect a Google Sheet (OAuth instead of a service account).
 5. Test mode: the owner orders from their own phone; the bot shows what customers will see.
-6. Go live: the bot gives the owner the first broadcast text with the link.
+6. Go live: `OPTIN` the regulars, then the first `MENU` → **Publish** → **Send menu**.
 
 ### 5.4 Owner web app
 
@@ -219,7 +218,7 @@ flowchart TD
 
 1. **Hosting:** Cloud Run + Neon (recommended) or Fly/Railway/VPS?
 2. **Who owns the WhatsApp assets for kitchens 2+:** your portfolio (simpler now) or each kitchen's own (required for self-serve; needs Tech Provider status or a BSP)?
-3. **Dedicated bot number or coexistence** as the default for new kitchens. The first kitchen uses coexistence, with a utility-template menu push instead of broadcast lists; the open question is whether that's the default.
+3. **Coexistence onboarding route:** become a Tech Provider (our own Embedded Signup page, App Review; also needed for self-serve) or start through a BSP (faster, monthly fee per number). Coexistence itself is decided as the default.
 4. **When to go multi-tenant:** after which kitchen count, or when self-serve sign-up is needed?
 5. **Pricing:** flat tiers by order volume, or per order?
 6. **Templates:** which proactive messages are worth paying for (menu announcement, balance reminder, owner summary)?

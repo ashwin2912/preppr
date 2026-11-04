@@ -1,6 +1,8 @@
 # Meta / WhatsApp Cloud API setup
 
-Step-by-step setup for the bot's WhatsApp number. Do steps 1–2 first: business verification takes days to weeks, and nothing else depends on waiting for it.
+Meta-side setup for the bot. **The plan is coexistence**: the bot runs on the owner's existing WhatsApp Business number, onboarded with Embedded Signup. For that, do steps 1–3, 5 and 7 here, then follow [`coexistence-setup.md`](coexistence-setup.md) instead of steps 8–9. Steps 4, 6, 8 and 9 (test number, a separate bot number) are for week-1 testing on Meta's test number or for a kitchen that wants a separate number.
+
+Do steps 1–2 first: business verification takes days to weeks, and nothing else depends on waiting for it.
 
 Meta's dashboards change often. If a menu item has moved, the official guide is the reference: <https://developers.facebook.com/docs/whatsapp/cloud-api/get-started>.
 
@@ -23,14 +25,15 @@ flowchart TD
     I --> J["10. Payment method<br/>(for Phase 2 template)"]
 ```
 
-### The two numbers
+### The numbers
 
 | Number | Where it lives | Used for |
 |---|---|---|
-| Owner's existing number | WhatsApp Business app on the owner's phone | Daily broadcast lists, manual chats. **Do not** connect it to the API. |
-| New bot number | WhatsApp Cloud API (this guide) | All customer ordering, owner commands |
+| Owner's business number | WhatsApp Business app on the owner's phone **and** the Cloud API (coexistence) | All customer chats: bot ordering and the owner's own replies |
+| Owner's personal number | Regular WhatsApp | Owner commands (`MENU`, `SUMMARY`…) and alerts (`OWNER_NUMBERS`) |
+| Meta test number (week 1 only) | Cloud API | Trying the bot with up to 5 phones before onboarding the real number |
 
-To run the bot on the owner's existing number instead ("coexistence": the same number on the Business app and the API), follow [`coexistence-setup.md`](coexistence-setup.md). It disables broadcast lists, so the bot sends the daily menu itself.
+Coexistence disables broadcast lists, so the bot sends the daily menu itself (utility template, step 10).
 
 ---
 
@@ -138,7 +141,9 @@ The temporary token expires daily. Production uses a system user token that does
 
 If the token ever leaks, revoke it on the same screen and generate a new one.
 
-## 8. Add the real bot number
+## 8. Add a separate bot number (not the plan; skip with coexistence)
+
+With coexistence, onboard the owner's existing number through Embedded Signup instead ([`coexistence-setup.md`](coexistence-setup.md#onboarding-the-number)). This step is only for a kitchen that wants a new, separate number.
 
 Business verification should be done, or well under way, before this step.
 
@@ -165,7 +170,7 @@ Look for `name_status: APPROVED` and `quality_rating: GREEN`.
 
 7. **Profile:** in WhatsApp Manager → the number → **Profile**, add the logo, description, address, website, and hours. Customers see this when they open the chat.
 
-## 9. Switch the bot to the real number
+## 9. Switch the bot to the real number (separate number only; with coexistence see `coexistence-setup.md` onboarding day)
 
 1. Update `.env` or secrets:
    - `WA_PHONE_NUMBER_ID` = the real number's **Phone number ID** (not the phone number)
@@ -176,9 +181,9 @@ Look for `name_status: APPROVED` and `quality_rating: GREEN`.
 
 ## 10. Payment method
 
-**WhatsApp Manager → Settings → Payment methods → Add.** The MVP sends only free replies, so nothing should be charged. The card is needed later for the Phase 2 utility template ("ordering is open until …"), at roughly $0.006 per message.
+**WhatsApp Manager → Settings → Payment methods → Add.** Needed for coexistence: the daily menu push uses the `daily_order_open` utility template for opted-in customers outside their 24 h window, charged per message (a fraction of a cent in the US). Replies stay free.
 
-To set up the Phase 2 template later: **WhatsApp Manager → Message templates → Create template**. Category **Utility**. Text from the brief, with no menu items, prices, or promo language. If Meta re-categorizes it as **Marketing**, it won't deliver to US numbers. In that case, keep using broadcast lists.
+Create the template as described in [`coexistence-setup.md`](coexistence-setup.md#why-a-utility-template-with-no-menu-in-it): category **Utility**, no dishes, prices or promo language. If Meta re-categorizes it as **Marketing**, it won't deliver to US numbers; fix the wording and resubmit. Fallback meanwhile: the owner posts the menu on their Status with the order link.
 
 ---
 
@@ -190,8 +195,9 @@ To set up the Phase 2 template later: **WhatsApp Manager → Message templates �
 | `WA_PHONE_NUMBER_ID` | API Setup → Phone number ID (test number in step 4, real number in step 9) |
 | `WA_APP_SECRET` | App settings → Basic → App secret (step 5) |
 | `WA_VERIFY_TOKEN` | Any random string you choose; same value in the webhook config (step 5) |
-| `BOT_NUMBER` | The bot's own number in E.164 (test number, then real number) |
-| `OWNER_NUMBERS` | Owner phone(s) in E.164, comma-separated |
+| `BOT_NUMBER` | The number the bot answers on, E.164: the test number in week 1, then the owner's business number |
+| `OWNER_NUMBERS` | The owner's personal number(s), E.164, comma-separated; never `BOT_NUMBER` |
+| `WA_COEXISTENCE` | `1` once the business number is onboarded with coexistence |
 
 `WABA_ID` and the App ID are only needed for the `curl` checks above, not by the bot.
 
@@ -200,9 +206,9 @@ To set up the Phase 2 template later: **WhatsApp Manager → Message templates �
 ## Gotchas
 
 - **Test number:** it can only message the 5 verified recipients, and the owner uses one slot.
-- **A number on the API can't also be used in the WhatsApp app.** Don't install WhatsApp with the bot SIM after registering it.
+- **A number registered the regular way can't also be used in the WhatsApp app.** Only coexistence onboarding (Embedded Signup) keeps the Business app working on the same number.
 - **Webhook must answer fast with a valid HTTPS certificate.** The bot replies 200 immediately. Slow or failing responses make Meta retry and eventually disable the webhook.
-- **The bot replies only within 24 h of the customer's last message**, by design. Nothing reaches a customer who hasn't messaged the bot that day.
+- **The bot replies only within 24 h of the customer's last message**, by design. The only exception is the utility menu push to opted-in customers.
 - **Quality rating:** if many customers block or report the bot number, its rating drops and Meta can restrict it. Keep replies short and useful, and never message customers unprompted.
 - **Graph API version:** the bot defaults to `v23.0` (`WA_GRAPH_VERSION`). Meta retires old versions roughly two years after release; bump it when the dashboard warns.
-- **The owner's broadcasts only reach customers who saved the owner's business number in their contacts.** That's a WhatsApp rule for broadcast lists, not something the bot can fix.
+- **Broadcast lists stop working** once the number is on coexistence; the menu push replaces them.

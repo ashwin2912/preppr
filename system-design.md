@@ -1,26 +1,28 @@
 # System design: WhatsApp tiffin ordering bot
 
-How the MVP works today: who talks to whom, where data lives, and what runs when. The last sections cover running it on an always-on laptop and what to improve next.
+How the MVP works: who talks to whom, where data lives, and what runs when. The last sections cover running it on an always-on laptop and what to improve next.
+
+The target setup is **coexistence** (the bot on the owner's existing WhatsApp Business number); sections 1–2 describe it. Message handling, the inbox/outbox worker and the data model below are the same with or without coexistence. Details: `docs/coexistence-setup.md`.
 
 ---
 
 ## 1. The big picture
 
-Two WhatsApp numbers, two jobs:
+One business number, shared:
 
-- **Owner's existing number** (WhatsApp Business app on the owner's phone): sends the daily menu to broadcast lists and handles manual chats. The bot never touches it.
-- **Bot number** (new SIM, WhatsApp Cloud API): every customer order happens here, in 1:1 chats.
+- **Owner's WhatsApp Business number**: stays in the Business app on the owner's phone and is also on the Cloud API (coexistence). Customers order in the chat they already use. The bot answers people who are ordering; the owner can reply in any chat, and the bot then pauses for that customer.
+- **Owner's personal number**: sends commands (`MENU`, `SUMMARY`, `RESUME`…) to the business number and receives alerts and the cutoff summary.
 
 ```mermaid
 flowchart LR
     subgraph Phones["Phones"]
-        OWNERAPP["Owner phone<br/>WhatsApp Business app<br/>(existing number)"]
+        OWNERAPP["Owner phone<br/>WhatsApp Business app<br/>(business number)"]
+        PERSONAL["Owner's personal<br/>WhatsApp"]
         CUST["Customers<br/>(~500, 3 areas)"]
     end
 
     subgraph Meta["Meta"]
-        BL["Broadcast lists<br/>(2 x 256 contacts)"]
-        CLOUD["WhatsApp Cloud API<br/>(bot number)"]
+        CLOUD["WhatsApp Cloud API<br/>(same business number, coexistence)"]
     end
 
     subgraph Host["Server: laptop or Cloud Run"]
@@ -31,18 +33,18 @@ flowchart LR
     DB[("Postgres")]
     LLM["Claude API<br/>claude-haiku-5-5"]
 
-    OWNERAPP -- "1 daily menu + wa.me link" --> BL
-    BL -- "2 broadcast" --> CUST
-    CUST -- "3 tap link, chat 1:1" --> CLOUD
-    OWNERAPP -- "MENU / SUMMARY / RESUME<br/>(owner DMs the bot too)" --> CLOUD
+    PERSONAL -- "1 MENU / SUMMARY / RESUME" --> CLOUD
+    CLOUD -- "2 menu push to opted-in customers<br/>(text in window, utility template outside)" --> CUST
+    CUST -- "3 order in the usual chat" --> CLOUD
+    OWNERAPP -- "owner replies by hand<br/>(echoed: bot pauses for that chat)" --> CLOUD
     CLOUD -- "4 webhook POST /webhook" --> APP
-    APP -- "5 replies via Graph API" --> CLOUD
+    APP -- "5 replies via Graph API<br/>(also shown in the owner's app)" --> CLOUD
     APP <--> DB
     APP -- "parse menu / interpret order" --> LLM
     JOB -- "POST /jobs/cutoff every 5 min" --> APP
 ```
 
-**Cost rule behind the design:** a reply within 24 h of the customer's last message is free, and US numbers can't receive marketing templates. So the bot only ever *replies*. The daily "menu is out" push goes through the owner's broadcast lists instead.
+**Cost rule behind the design:** a reply within 24 h of the customer's last message is free, and US numbers can't receive marketing templates. So the bot *replies* in free-form text, and the only message it starts is the daily "ordering is open" push to opted-in customers: the menu itself when their window is open, otherwise the `daily_order_open` **utility** template (no dishes or prices), whose button opens the window. Broadcast lists don't work on a coexistence number.
 
 ---
 
@@ -51,7 +53,7 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     autonumber
-    actor O as Owner
+    actor O as Owner (personal number)
     participant B as Bot
     participant DB as Postgres
     participant C as Claude
@@ -66,15 +68,20 @@ sequenceDiagram
     B-->>O: Preview + [Publish] [Edit]
     O->>B: tap Publish
     B->>DB: status=active
-    B-->>O: Ready-to-forward broadcast text with wa.me link
-    O->>U: Forward to broadcast lists (manual, from business app)
+    B-->>O: Send the menu to N customers? [Send menu] + order link
+    O->>B: tap Send menu
+    alt customer messaged in the last 24 h
+        B-->>U: Today's menu (free text)
+    else window closed
+        B-->>U: daily_order_open utility template [See menu] [Skip today]
+        U->>B: tap See menu
+        B-->>U: Today's menu
+    end
 
-    Note over U,B: Ordering window
-    U->>B: "Order" (from wa.me link)
-    alt unknown customer
+    Note over U,B: Ordering window (the customer's usual chat with the kitchen)
+    alt unknown number asking to order
         B-->>U: name? then area buttons, then address note
     end
-    B-->>U: Today's menu
     U->>B: "do dal aur 4 roti, no onion"
     B->>C: interpret(message, menu, current order, previous order)
     C-->>B: intent=order, lines, unmatched, confidence
@@ -84,6 +91,10 @@ sequenceDiagram
     U->>B: tap Confirm
     B->>DB: status=confirmed
     B-->>U: You're in! Delivery to Newport today
+
+    Note over O,U: Any time: the owner types in the chat from the Business app
+    O->>U: reply in the app (echoed to the bot)
+    B->>DB: pause bot for this customer (4 h or RESUME)
 
     Note over S,O: Cutoff
     S->>B: POST /jobs/cutoff
@@ -456,7 +467,7 @@ flowchart LR
 
 ### Owner workload
 
-4. **Daily manual broadcast.** Phase 2 utility template ("ordering is open until 10:30, reply MENU") could replace it, if Meta classifies it as utility.
+4. **Daily menu push** replaces the manual broadcast (coexistence disables broadcast lists). It depends on the `daily_order_open` template staying in the utility category; if Meta re-categorizes it, US customers stop getting it and the owner falls back to Status posts.
 5. **Summary depends on the owner's 24 h window.** It works because the owner sends MENU each morning. A utility template to the owner number would remove that dependency.
 6. **A published menu with orders can't be edited.** Add "sold out" (`SOLDOUT paneer`) and price edits that keep item ids stable instead of replacing the menu.
 

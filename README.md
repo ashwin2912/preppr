@@ -2,14 +2,16 @@
 
 WhatsApp ordering assistant for small kitchens. Customers order in plain chat ("2 dal aur 4 roti, no onion"), Preppr turns that into an itemized order with a total and a Confirm button, and at cutoff the kitchen gets what to cook and a delivery list grouped by area.
 
-Built for a home-style tiffin service doing ~500 orders a day on the official WhatsApp Cloud API. Node 20 + TypeScript, Hono, Postgres (Drizzle), and an LLM for reading messy order text; prices and totals are always computed in code.
+Built for a home-style tiffin service doing ~500 orders a day. The bot runs on the kitchen's **existing WhatsApp Business number** through the official Cloud API (Meta calls this *coexistence*): customers keep ordering in the chat they already use, and the owner keeps the Business app and sees every bot reply in it. Node 20 + TypeScript, Hono, Postgres (Drizzle), and an LLM for reading messy order text; prices and totals are always computed in code.
 
 - **Ordering in chat:** onboarding (name, area, address), free-text orders in English/Hindi/Hinglish, edits, cancel, "same as yesterday", Confirm/Change buttons.
-- **Owner commands over WhatsApp:** `MENU` to publish the day's menu, `SUMMARY`, `ORDERS`, `CLOSE`, `OPEN`, `RESUME`, plus payment commands.
+- **Owner commands over WhatsApp:** from the owner's personal number to the business number: `MENU` to publish the day's menu, `SUMMARY`, `ORDERS`, `CLOSE`, `OPEN`, `RESUME`, plus payment and opt-in commands.
+- **Daily menu push (replaces broadcast lists):** opted-in customers get the menu in chat, or a utility "ordering is open" template when their 24-hour window is closed.
+- **Shares the chat with the owner:** when the owner types to a customer in the app, the bot steps back for that customer. People who aren't ordering (friends, suppliers) get no bot reply.
 - **Google Sheet:** orders (a tab per day, with kitchen totals), customers with balances, and payments, synced about every 30 s.
 - **Payments and balances:** customers report payments in chat ("paid $20 zelle"); the owner verifies with one tap. One ledger covers pay-per-order and prepaid customers.
 - **Cutoff summary:** kitchen totals per item, deliveries by area, unconfirmed drafts, anything that needs a human.
-- **Safe by default:** webhook signature check, idempotent message handling, per-customer locking, replies only inside WhatsApp's free 24-hour window.
+- **Safe by default:** webhook signature check, idempotent message handling, per-customer locking, free-form replies only inside WhatsApp's free 24-hour window. The one template is the utility menu push, sent only to customers who opted in.
 - **Any model:** Claude by default; any OpenAI-compatible API (OpenRouter, Hugging Face, Ollama) for testing.
 
 - **Orders without the bot:** `preppr-orders`, a one-file Mac tool, reads the day's orders from the WhatsApp Business chats in the owner's iPhone backup and writes a spreadsheet. See [Orders from the iPhone backup](#orders-from-the-iphone-backup-mac).
@@ -18,25 +20,31 @@ Roadmap: thermal-printed route sheets, sales history, and prep forecasting.
 
 ## How it works
 
-Customers order in a 1:1 WhatsApp chat with a bot on its own number. The owner keeps sending the daily menu from the existing WhatsApp Business app number via broadcast lists; the broadcast carries a `wa.me` "tap to order" link to the bot.
+One number, two front ends. The kitchen's WhatsApp Business number stays in the **Business app** on the owner's phone and is also connected to the **Cloud API** (coexistence, `WA_COEXISTENCE=1`). Customers message that number as they always have; the bot answers the ones who are ordering, and the owner sees the whole conversation in the app.
 
-The bot never starts a conversation. It only replies inside the 24-hour customer-service window, which costs nothing. Every send goes through `src/wa/send.ts`, which refuses to send (and logs) when the recipient's last inbound message is more than 24 h old.
+- **Owner:** sends commands from a **personal** WhatsApp number (`OWNER_NUMBERS`) to the business number. Alerts and the cutoff summary arrive there.
+- **Owner replies by hand** in the Business app whenever they like. Meta echoes those messages to the bot (`smb_message_echoes`), and the bot pauses for that customer for 4 hours (or until `RESUME`).
+- **Unknown numbers** get no bot reply unless they ask to order ("order", "menu", "tiffin"), so friends, family and suppliers are left to the owner and stay unread in the app.
+- **Daily menu:** broadcast lists are disabled on a coexistence number, so the bot sends the menu itself to opted-in customers (`src/jobs/menuPush.ts`).
+- **Cost:** replies inside the 24-hour customer-service window are free, and every free-form send goes through `src/wa/send.ts`, which refuses (and logs) outside that window. The only paid message is the `daily_order_open` utility template, for opted-in customers whose window is closed. It never lists dishes or prices, because Meta blocks marketing templates to US numbers.
+- **Onboarding** the number to the API is done once through Meta's Embedded Signup (as a Tech Provider or through a BSP), then `pnpm wa:sync` within 24 h pulls contacts and up to 6 months of chat history.
+
+Setup, template wording, onboarding day and smoke test: [docs/coexistence-setup.md](docs/coexistence-setup.md).
 
 ## How a day runs
 
-1. Owner DMs the bot: `MENU Mon: Dal makhani 6, Jeera rice 4, Roti 1 each, Paneer bhurji 7. Cutoff 10:30`
-2. Bot replies with a preview + **Publish** / **Edit**. Publish opens ordering and sends back a ready-to-forward broadcast message with the `wa.me` link.
-3. Owner forwards that message to the broadcast lists from the business app.
-4. Customers tap the link and type their order ("2 dal, 3 roti") → itemized summary with total → **Confirm ✅** / **Change ✏️**. Known customers (imported from the owner's contacts, or added with `ADD`) are never asked anything. Only numbers the kitchen doesn't know get the short sign-up (name, area, delivery note) first.
-5. At cutoff, Cloud Scheduler hits `/jobs/cutoff`: the menu closes and the owner gets kitchen totals, a delivery list grouped by area, unconfirmed drafts, and anything flagged.
+1. From their personal WhatsApp, the owner messages the business number: `MENU Mon: Dal makhani 6, Jeera rice 4, Roti 1 each, Paneer bhurji 7. Cutoff 10:30`
+2. Bot replies with a preview + **Publish** / **Edit**. Publish opens ordering and asks "Send the menu to N customers who asked for it?", plus an order link (`wa.me/<number>?text=ORDER`) for the owner's Status or groups.
+3. **Send menu:** customers who messaged in the last 24 h get the menu as a normal message (free); other opted-in customers get the `daily_order_open` utility template, whose **See menu** button opens the chat and brings the menu. Each customer gets it once per menu.
+4. Customers type their order in the usual chat ("2 dal, 3 roti") → itemized summary with total → **Confirm ✅** / **Change ✏️**. Known customers (imported from the owner's contacts, or added with `ADD`) are never asked anything. Only numbers the kitchen doesn't know, and who ask to order, get the short sign-up (name, area, delivery note) first. After a first confirmed order the bot asks once whether they want the daily menu.
+5. The owner can jump into any chat from the Business app; the bot steps back for that customer.
+6. At cutoff, the scheduler hits `/jobs/cutoff`: the menu closes and the owner gets kitchen totals, a delivery list grouped by area, unconfirmed drafts, and anything flagged.
 
-Owner commands: `MENU …`, `SUMMARY`, `ORDERS`, `CLOSE`, `OPEN [11:30]`, `RESUME <number>`, `HELP`.
+Owner commands: `MENU …`, `SUMMARY`, `ORDERS`, `CLOSE`, `OPEN [11:30]`, `RESUME <number>`, `CHATS`, `OPTIN <number|ALL>`, `OPTOUT <number>`, `HELP`. Customers can send `STOP` / `START` for the daily menu.
 
-Customers: the owner can share contact cards with the bot (📎 → Contact) to add regulars in bulk. `ADD <number> [name]` adds one, and `NAME` / `AREA` / `NOTE <number> <value>` fill in details. Known customers without a name get their WhatsApp profile name automatically. Customers without an area are listed under "No area" until the owner sets one.
+Customers: the owner can share contact cards from their personal WhatsApp to the business number (📎 → Contact) to add regulars in bulk. `ADD <number> [name]` adds one, and `NAME` / `AREA` / `NOTE <number> <value>` fill in details. Known customers without a name get their WhatsApp profile name automatically. Customers without an area are listed under "No area" until the owner sets one.
 
 Payments: customers can just say "paid $20 on zelle". The bot records it as **to verify**, thanks them, and sends the owner **Verify ✅ / Reject ❌** buttons. Balance = confirmed orders − verified payments (negative = prepaid credit), shown on order confirmation when something is due. Owner commands: `PENDING`, `VERIFY <#>`, `REJECT <#>`, `PAID <number> <amount> [cash|zelle|venmo|card]` (recorded as verified), `BALANCE <number>`, `DUES`, `BLOCK <number>`, `UNBLOCK <number>`.
-
-Customers who still reply to the owner's business number out of habit are handled by the owner by hand (a quick reply pointing them to the link). The bot has no involvement there.
 
 ## Orders from the iPhone backup (Mac)
 
@@ -115,11 +123,12 @@ CSV header: `phone,name,area,address_note` (optional extra column `notes`). Phon
 
 ## Docs
 
+- [docs/coexistence-setup.md](docs/coexistence-setup.md): **start here.** The bot on the owner's existing number: how it behaves, the menu template, onboarding day, smoke test.
 - [docs/backup-orders.md](docs/backup-orders.md): the Mac tool for orders from the iPhone backup: owner steps, hosting the binaries, `--check`, troubleshooting.
 - [docs/pilot-cloudflare.md](docs/pilot-cloudflare.md): pilot deploy on one machine (laptop or VPS) with Docker, a Cloudflare tunnel and a Cloudflare cron Worker.
 - [docs/deployment-plan.md](docs/deployment-plan.md): deploying one kitchen, then many; productizing (multi-tenant, Embedded Signup, billing).
-- [docs/meta-setup.md](docs/meta-setup.md): WhatsApp Cloud API setup, step by step. Start business verification early; it takes days.
-- [docs/owner-setup.md](docs/owner-setup.md): for the owner: adding regulars, redirecting old chats, `CHATS`, exporting past chats.
+- [docs/meta-setup.md](docs/meta-setup.md): Meta business portfolio, verification, app, webhook and permanent token (the parts coexistence still needs). Start business verification early; it takes days.
+- [docs/owner-setup.md](docs/owner-setup.md): for the owner: commands from the personal number, adding regulars, the daily menu push, `CHATS`.
 - [docs/monitoring.md](docs/monitoring.md): Sentry and UptimeRobot setup, what each alert means, runbook.
 - [docs/google-sheet-setup.md](docs/google-sheet-setup.md): Google Sheet export of orders, customers and payments.
 - [docs/production-readiness.md](docs/production-readiness.md): what's left before launch, reliability work, parsing cost options.
@@ -165,6 +174,8 @@ If the owner hasn't messaged the bot in 24 h (normally the morning `MENU` covers
 ```
 src/app.ts              routes: /webhook, /jobs/cutoff, /healthz, /readyz
 src/flows/router.ts     dedupe, lock, owner vs customer, takeover, onboarding
+src/flows/coexistence.ts  owner's app messages (pause bot), history and contact sync
+src/jobs/menuPush.ts    daily menu to opted-in customers (in-window text or utility template)
 src/flows/owner.ts      owner commands, menu publish
 src/flows/customer.ts   ordering, edits, cancel, questions, confirm buttons
 src/flows/onboarding.ts name → area → address note
@@ -188,7 +199,7 @@ src/wa/*                Graph API client, signature check, guarded send
 
 ## Status
 
-Working MVP: tested end to end on Meta's test number, not yet in production.
+Working MVP: tested end to end on Meta's test number, not yet in production. Coexistence (bot on the owner's existing number) is the plan for the first kitchen and what's being implemented now: built and tested with fakes, not yet tried on a real coexistence number. The onboarding route (Tech Provider with our own Embedded Signup page, or a BSP) is still to choose.
 
 Recent work:
 - `preppr-orders` (Mac, iPhone backup → orders CSV): built, tested on a synthetic plain and encrypted backup, binary run end to end with a stand-in model. Not yet run on the owner's real backup; binaries still need a public host (`PREPPR_BASE_URL` in `deploy/mac/install.sh`).

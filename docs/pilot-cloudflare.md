@@ -24,7 +24,7 @@ Nothing in Cloudflare. In Meta, the owner owns the business portfolio and the Wh
 - owner phone number(s), delivery areas, payment instructions, kitchen days, cutoff time;
 - their phone contacts as a `.vcf` export (for `pnpm import:customers`), or they share contacts with the bot later (`docs/owner-setup.md`).
 
-Week 1 can run on Meta's free **test number** (up to 5 recipient phones: the owner and 3–4 friendly customers). Then move to the owner's own number through coexistence onboarding (`docs/coexistence-setup.md`), or to a dedicated bot number (`docs/meta-setup.md` step 8). Start business verification on day 1; it takes days.
+Week 1 can run on Meta's free **test number** (up to 5 recipient phones: the owner and 3–4 friendly customers). Then move to the owner's own number through coexistence onboarding (`docs/coexistence-setup.md`) and set `WA_COEXISTENCE=1`. On the test number, leave `WA_COEXISTENCE` unset: the test number has no Business app behind it. Start business verification on day 1; it takes days.
 
 ## One-time setup (shared)
 

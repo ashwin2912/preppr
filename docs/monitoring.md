@@ -50,7 +50,7 @@ The link becomes a cookie scoped to `/admin`, so it isn't left in the address ba
 **Bot not replying**
 1. Check `/readyz`. A 503 with `db: error` means the database: check Neon status and `DATABASE_URL`.
 2. If backlog > 0, the worker is stuck: restart the service (`gcloud run services update preppr --region us-east4 --update-env-vars RESTART=$(date +%s)`, or `pm2 restart preppr` on the laptop). Nothing is lost: queued messages are handled after the restart.
-3. Down for more than 10 minutes during the ordering window: the owner sends the pre-written "bot is down, reply here with your order" broadcast.
+3. Down for more than 10 minutes during the ordering window: tell the owner to take orders by hand in the WhatsApp Business app (customers are already in that chat). Broadcast lists don't work on a coexistence number.
 
 **Replay a failed message** (after fixing the cause):
 ```sql
