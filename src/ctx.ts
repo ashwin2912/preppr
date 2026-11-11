@@ -18,6 +18,11 @@ export type Ctx = {
    * prefix to the inbound wamid, so a retried handler can't queue a reply twice.
    */
   out?: { prefix: string; n: number };
+  /**
+   * BOT_MODE=assist: this handler's customer replies are safe to send (a
+   * high-confidence order summary, or the confirm/change flow after one).
+   */
+  assist?: boolean;
   /** Wake the worker after queueing work. */
   kick?: () => void;
 };

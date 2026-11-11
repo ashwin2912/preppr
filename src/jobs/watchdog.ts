@@ -1,21 +1,24 @@
-import { and, count, eq, gt, gte, isNull, like, lt, lte, ne, notExists, or, inArray } from "drizzle-orm";
+import { and, count, eq, gt, gte, isNull, like, lt, lte, max, min, ne, notExists, or, inArray, sql } from "drizzle-orm";
 import { formatInTimeZone } from "date-fns-tz";
 import type { Q } from "../db/client";
-import { inbox, kv, menus, outbox, payments, waStatuses } from "../db/schema";
+import { inbox, kv, menus, messages, outbox, payments, rawWebhooks, waStatuses } from "../db/schema";
 import type { Deps } from "../flows/router";
 import { log } from "../lib/log";
 import { addDays, localDate, zonedInstant } from "../lib/time";
-import { send } from "../wa/send";
+import { botOff, effectiveMode, notifyOps, notifyOwners, send } from "../wa/send";
 
 export const BACKLOG_MS = 2 * 60 * 1000;
 export const SUMMARY_GRACE_MS = 30 * 60 * 1000;
 export const UNVERIFIED_MS = 24 * 60 * 60 * 1000;
 export const UNDELIVERED_MS = 15 * 60 * 1000;
+/** Coexistence: the Business app must be opened every 13 days; warn at 10 days without an echo. */
+export const APP_IDLE_MS = 10 * 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 
 /** Rows that are due but nobody has picked up for a while: the worker is stuck or down. */
 export async function backlog(db: Q, now: Date) {
   const old = new Date(now.getTime() - BACKLOG_MS);
-  const stuck = (t: typeof inbox | typeof outbox) =>
+  const stuck = (t: typeof inbox | typeof outbox | typeof rawWebhooks) =>
     and(
       lt(t.createdAt, old),
       or(
@@ -25,7 +28,31 @@ export async function backlog(db: Q, now: Date) {
     );
   const [i] = (await db.select({ n: count() }).from(inbox).where(stuck(inbox))) as [{ n: number }];
   const [o] = (await db.select({ n: count() }).from(outbox).where(stuck(outbox))) as [{ n: number }];
-  return { inbox: Number(i.n), outbox: Number(o.n) };
+  // Webhook bodies not yet normalized are inbound backlog too.
+  const [r] = (await db.select({ n: count() }).from(rawWebhooks).where(stuck(rawWebhooks))) as [{ n: number }];
+  return { inbox: Number(i.n) + Number(r.n), outbox: Number(o.n) };
+}
+
+export async function lastInboundWebhookAt(db: Q): Promise<Date | null> {
+  const [row] = await db.select({ at: max(rawWebhooks.receivedAt) }).from(rawWebhooks);
+  return row?.at ? new Date(row.at) : null;
+}
+
+/** GET /health: everything an uptime monitor or `pnpm wa:check` wants in one call. Throws if the DB is down. */
+export async function healthReport(deps: Deps) {
+  await deps.db.execute(sql`select 1`);
+  const depth = async (t: typeof inbox | typeof outbox | typeof rawWebhooks) =>
+    Number(((await deps.db.select({ n: count() }).from(t).where(inArray(t.status, ["pending", "processing"]))) as [{ n: number }])[0].n);
+  return {
+    db: "ok",
+    provider: deps.cfg.waProvider,
+    mode: await effectiveMode(deps),
+    botOff: await botOff(deps),
+    lastInboundAt: (await lastInboundWebhookAt(deps.db))?.toISOString() ?? null,
+    webhookDepth: await depth(rawWebhooks),
+    inboxDepth: await depth(inbox),
+    outboxDepth: await depth(outbox),
+  };
 }
 
 /** True the first time `key` is seen; used to fire each alert once. */
@@ -102,6 +129,57 @@ export async function runWatchdog(deps: Deps): Promise<string[]> {
   if (b.inbox || b.outbox) {
     const hour = formatInTimeZone(now, cfg.tz, "yyyy-MM-dd'T'HH");
     await alert("queue_backlog", hour, "messages waiting more than 2 minutes", b);
+  }
+
+  // Ops alerts also reach OPERATOR_NUMBERS on WhatsApp.
+  const opsAlert = async (name: string, key: string, message: string, fields: Record<string, unknown> = {}) => {
+    if (!(await firstTime(db, `alert:${name}:${key}`, now))) return false;
+    await notifyOps({ ...deps, out: { prefix: `watchdog:${name}:${key}`, n: 0 } }, name, message, fields);
+    fired.push(name);
+    return true;
+  };
+
+  // Ordering is open but no webhook (of any kind) for a while: webhook URL, tunnel or key broken.
+  const [open] = await db
+    .select({ createdAt: menus.createdAt, cutoffAt: menus.cutoffAt })
+    .from(menus)
+    .where(and(eq(menus.date, today), eq(menus.status, "active"), gt(menus.cutoffAt, now)));
+  // Owner-only: customers never write to this number, so silence is normal.
+  if (open && !cfg.ownerOnly) {
+    const quietMs = cfg.watchdogNoInboundMin * 60 * 1000;
+    const last = await lastInboundWebhookAt(db);
+    const since = Math.max(open.createdAt.getTime(), last?.getTime() ?? 0);
+    if (now.getTime() - since > quietMs)
+      await opsAlert("no_inbound", `${today}:${Math.floor(now.getTime() / quietMs)}`, `No WhatsApp webhooks for ${cfg.watchdogNoInboundMin} min while ordering is open. Check the tunnel, webhook URL and key (pnpm wa:check).`, {
+        lastInboundAt: last?.toISOString() ?? null,
+      });
+  }
+
+  // Sends giving up: provider down, key revoked, balance, or many closed windows.
+  const [{ n: failed }] = (await db
+    .select({ n: count() })
+    .from(outbox)
+    .where(and(eq(outbox.status, "failed"), gte(outbox.createdAt, new Date(now.getTime() - HOUR_MS))))) as [{ n: number }];
+  if (Number(failed) > cfg.sendFailThreshold) {
+    const hour = formatInTimeZone(now, cfg.tz, "yyyy-MM-dd'T'HH");
+    await opsAlert("send_failures", hour, `${failed} WhatsApp sends failed in the last hour (threshold ${cfg.sendFailThreshold}). See Sentry alert=send_dead / send_config.`, {
+      failed: Number(failed),
+    });
+  }
+
+  // Coexistence: no echo for 10 days means the owner may not have opened the Business app (13-day rule).
+  if (cfg.coexistence) {
+    const [e] = await db.select({ at: max(messages.createdAt) }).from(messages).where(eq(messages.source, "app"));
+    const [first] = await db.select({ at: min(rawWebhooks.receivedAt) }).from(rawWebhooks);
+    const ref = e?.at ?? first?.at ?? null;
+    if (ref && now.getTime() - new Date(ref).getTime() > APP_IDLE_MS) {
+      const key = new Date(ref).toISOString();
+      if (await opsAlert("app_idle", key, "No messages from the WhatsApp Business app for 10 days; it must be opened every 13 days or the number disconnects."))
+        await notifyOwners(
+          { ...deps, out: { prefix: `watchdog:app_idle_owner:${key}`, n: 0 } },
+          "📱 Please open the WhatsApp Business app on your phone today (and keep it opened at least once a week). If it stays closed for 13 days, WhatsApp disconnects the ordering bot.",
+        );
+    }
   }
 
   // Reported payments nobody has verified for a day: nudge the owner on WhatsApp, once a day.

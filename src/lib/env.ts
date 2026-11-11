@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 
-/** Loads ./.env (or `path`) if present. Variables already set in the shell win. */
-export function loadDotEnv(path = ".env") {
+/** Loads `path` (default `$ENV_FILE`, else ./.env) if present. Variables already set in the shell win. */
+export function loadDotEnv(path = process.env.ENV_FILE || ".env") {
   if (!existsSync(path)) return;
   if (typeof process.loadEnvFile === "function") return process.loadEnvFile(path);
   // Runtimes without loadEnvFile (Bun binaries): plain KEY=VALUE lines.

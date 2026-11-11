@@ -1,0 +1,26 @@
+{
+  "id": "EVT_HIST_2",
+  "event": "history",
+  "data": {
+    "id": "WABA_ID",
+    "messaging_product": "whatsapp",
+    "metadata": {
+      "display_phone_number": "12015550199",
+      "phone_number_id": "PNID"
+    },
+    "history": [
+      {
+        "errors": [
+          {
+            "code": 2593109,
+            "title": "History sync is turned off by the business from the WhatsApp Business App",
+            "message": "History sync is turned off by the business from the WhatsApp Business App",
+            "error_data": {
+              "details": "History sync is turned off by the business from the WhatsApp Business App"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

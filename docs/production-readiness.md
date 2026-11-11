@@ -84,6 +84,9 @@ Simulate ~50 customers messaging within 1–2 minutes of the broadcast against a
 
 ---
 
+### Backlog: voice notes and images
+Today a voice note or photo gets "Please type your order" and is forwarded to the owner. Later: download the media and transcribe voice notes into the parser. Verified 360dialog steps (docs/360dialog.md): `GET https://waba-v2.360dialog.io/{media-id}` with `D360-API-KEY` returns a `url` on `lookaside.fbsbx.com`; swap that host for `waba-v2.360dialog.io`, keep path and query, and `GET` it with the same header within 5 minutes. Not available on the sandbox. Meta direct: `GET graph.facebook.com/{media-id}` then the returned URL with the bearer token.
+
 ## 4. Operations
 
 - [ ] **Pilot:** one area, 20–30 customers, for one week. The owner keeps accepting manual orders as a backup. Compare the cutoff summary to what the owner would have written by hand.

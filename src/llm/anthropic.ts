@@ -1,14 +1,19 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { z } from "zod";
-import { buildInterpretPrompt, INTERPRET_SYSTEM, MENU_SYSTEM } from "./prompts";
+import { buildInterpretPrompt, buildOwnerPrompt, INTERPRET_SYSTEM, MENU_SYSTEM, OWNER_SYSTEM, PRODUCTS_SYSTEM } from "./prompts";
 import {
   InterpretationSchema,
+  OwnerActionSchema,
   ParsedMenuSchema,
+  ParsedProductsSchema,
   type InterpretInput,
   type Interpretation,
   type Llm,
+  type OwnerAction,
+  type OwnerInterpretInput,
   type ParsedMenu,
+  type ParsedProducts,
 } from "./types";
 
 export class AnthropicLlm implements Llm {
@@ -37,7 +42,15 @@ export class AnthropicLlm implements Llm {
     return this.structured(MENU_SYSTEM, `<menu>\n${text}\n</menu>`, ParsedMenuSchema);
   }
 
+  parseProducts(text: string): Promise<ParsedProducts> {
+    return this.structured(PRODUCTS_SYSTEM, `<products>\n${text}\n</products>`, ParsedProductsSchema);
+  }
+
   interpret(input: InterpretInput): Promise<Interpretation> {
     return this.structured(INTERPRET_SYSTEM, buildInterpretPrompt(input), InterpretationSchema);
+  }
+
+  interpretOwner(input: OwnerInterpretInput): Promise<OwnerAction> {
+    return this.structured(OWNER_SYSTEM, buildOwnerPrompt(input), OwnerActionSchema);
   }
 }

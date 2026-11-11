@@ -1,0 +1,8 @@
+{
+  "id": "EVT_X_1",
+  "event": "something_new",
+  "data": {
+    "id": "WABA_ID",
+    "foo": 1
+  }
+}

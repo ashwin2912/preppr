@@ -17,6 +17,76 @@ export const ParsedMenuSchema = z.object({
 });
 export type ParsedMenu = z.infer<typeof ParsedMenuSchema>;
 
+export const ParsedProductsSchema = z.object({
+  products: z.array(
+    z.object({
+      name: z.string().describe("Dish name as the owner wrote it, Title Case, without sizes or prices"),
+      sizes: z
+        .array(
+          z.object({
+            label: z.string().describe('Size or unit exactly as written, e.g. "8oz", "16oz", "S", "Large", "Half"; "each" if the dish has no sizes'),
+            price_cents: z.number().int().describe("Price for this size in US cents, only from a price the owner wrote"),
+          }),
+        )
+        .describe("One entry per size; a dish without sizes has one entry"),
+      aliases: z.array(z.string()).describe("Lowercase alternative names/spellings customers might type"),
+    }),
+  ),
+});
+export type ParsedProducts = z.infer<typeof ParsedProductsSchema>;
+
+export const OWNER_ACTIONS = [
+  "add_products",
+  "edit_product",
+  "remove_product",
+  "set_menu",
+  "edit_menu",
+  "copy_menu",
+  "set_cutoff",
+  "show_products",
+  "show_menu",
+  "how",
+  "what",
+  "orders",
+  "message",
+  "help",
+  "other",
+] as const;
+export type OwnerActionName = (typeof OWNER_ACTIONS)[number];
+
+const DishPick = z.object({
+  n: z.number().int().describe("The dish's number from <products>"),
+  sizes: z.array(z.string()).describe("Size labels exactly as in <products>; empty = every size of the dish"),
+});
+
+export const OwnerActionSchema = z.object({
+  action: z.enum(OWNER_ACTIONS),
+  products: ParsedProductsSchema.shape.products.describe(
+    "add_products: the new dishes. edit_product: each changed dish with its COMPLETE resulting size list. Else empty",
+  ),
+  product_ns: z.array(z.number().int()).describe("edit_product / remove_product: the dish numbers from <products>, same order as products; else empty"),
+  day: z.string().nullable().describe('The menu day the owner means ("today", "tomorrow", "Tue"); null if not said'),
+  dishes: z.array(DishPick).describe("set_menu: the COMPLETE menu. edit_menu / copy_menu: dishes or sizes to add. Else empty"),
+  remove_dishes: z.array(DishPick).describe("edit_menu / copy_menu: dishes or sizes to take off. Else empty"),
+  copy_from: z.string().nullable().describe('copy_menu: which earlier menu ("yesterday", "Mon", "last"); else null'),
+  cutoff: z.string().nullable().describe('Cutoff time exactly as written ("11", "10:30am"); null if not said'),
+  unknown: z.array(z.string()).describe("Dishes the owner named that are not in <products>, as written"),
+  reply: z.string().nullable().describe("action other: one short question or answer for the owner; else null"),
+});
+export type OwnerAction = z.infer<typeof OwnerActionSchema>;
+
+export type OwnerInterpretInput = {
+  message: string;
+  /** Today in the kitchen's time zone, e.g. "Mon 2026-10-19". */
+  today: string;
+  /** Active products in list order; `n` is the 1-based number the owner sees. */
+  products: { n: number; name: string; sizes: string }[];
+  /** The menu she is working on (draft) or today's menu, if any. */
+  openMenu: { date: string; status: string; dishes: string } | null;
+  /** Latest published menu before the open one. */
+  lastMenu: { date: string; dishes: string } | null;
+};
+
 export const INTENTS = ["order", "edit", "cancel", "question", "handoff", "menu", "payment", "other"] as const;
 export type Intent = (typeof INTENTS)[number];
 
@@ -55,7 +125,11 @@ export type InterpretInput = {
 
 export interface Llm {
   parseMenu(text: string): Promise<ParsedMenu>;
+  /** Owner's product-list text ("Dal 8oz 6, 16oz 10") -> products with sizes; prices are checked against the text in code. */
+  parseProducts(text: string): Promise<ParsedProducts>;
   interpret(input: InterpretInput): Promise<Interpretation>;
+  /** Owner's plain chat about dishes and menus -> one action; ids and labels only, checked in code. */
+  interpretOwner(input: OwnerInterpretInput): Promise<OwnerAction>;
 }
 
 /** The model call failed (down, timeout, unparsable output). */

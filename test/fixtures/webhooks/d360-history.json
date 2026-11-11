@@ -1,0 +1,53 @@
+{
+  "id": "EVT_HIST_1",
+  "event": "history",
+  "data": {
+    "id": "WABA_ID",
+    "messaging_product": "whatsapp",
+    "metadata": {
+      "display_phone_number": "12015550199",
+      "phone_number_id": "PNID"
+    },
+    "history": [
+      {
+        "metadata": {
+          "phase": 0,
+          "chunk_order": 1,
+          "progress": 100
+        },
+        "threads": [
+          {
+            "id": "12015550001",
+            "messages": [
+              {
+                "id": "wamid.fx.dh1",
+                "from": "12015550001",
+                "timestamp": "1760875200",
+                "type": "text",
+                "text": {
+                  "body": "2 dal and rice"
+                },
+                "history_context": {
+                  "status": "READ"
+                }
+              },
+              {
+                "id": "wamid.fx.dh2",
+                "from": "12015550199",
+                "to": "12015550001",
+                "timestamp": "1760875200",
+                "type": "text",
+                "text": {
+                  "body": "ok ji"
+                },
+                "history_context": {
+                  "status": "DELIVERED"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

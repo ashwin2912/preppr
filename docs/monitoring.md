@@ -4,7 +4,7 @@
 
 | Signal | Where it goes | Fires when |
 |---|---|---|
-| Server down or stuck | UptimeRobot → SMS/email | `GET /readyz` returns non-200 or times out |
+| Server down or stuck | UptimeRobot → SMS/email | `GET /readyz` returns non-200 or times out (or `GET /health` for DB-only; it also shows last inbound, queue depths and mode) |
 | Any `ERROR` log | Sentry → email/push | Crashes, dead-lettered messages, failed sends, Sheet sync failing |
 | `alert=no_menu` | Sentry | No published menu by `MENU_EXPECTED_BY` (default 9:00) on a `KITCHEN_DAYS` day |
 | `alert=summary_late` | Sentry | A closed menu's summary still isn't delivered 30 min after cutoff (usually the owner's 24h window is closed: the owner sends `SUMMARY`) |
@@ -15,6 +15,14 @@
 | `alert=owner_delivery_failed` | Sentry | Same, for a message to an owner number |
 | `alert=summary_undelivered` | Sentry | The cutoff summary was sent 15 min ago but never reached the owner's phone (phone off, no data). Call the owner. |
 | `alert=sheet_sync_failing` | Sentry | 3 Google Sheet syncs in a row failed |
+| `alert=webhook_auth_rejected` | Sentry (one issue, counted) | A webhook failed the HMAC (meta) or `X-Preppr-Secret` (d360) check. A burst after a key/secret change means the webhook header is stale: `pnpm wa:webhook:set` |
+| `alert=webhook_unknown_shape` | Sentry | A webhook body we don't recognize. Kept in `raw_webhooks` (shape `unknown`), never dropped |
+| `alert=webhook_dead` | Sentry | A stored webhook body failed to process 4 times; it stays in `raw_webhooks` with status `failed` |
+| `alert=no_inbound` | Sentry + WhatsApp to `OPERATOR_NUMBERS` | Ordering is open and no webhook arrived for `WATCHDOG_NO_INBOUND_MIN` (default 120) min |
+| `alert=send_failures` | Sentry + WhatsApp to ops | More than `SEND_FAIL_THRESHOLD` (default 3) sends dead-lettered in an hour |
+| `alert=send_config` | Sentry | A send failed on setup: bad key/token (401), no balance (403), permission. Fix the key, then check `pnpm wa:check` |
+| `alert=history_declined` | Sentry + WhatsApp to ops | Coexistence history sync declined in the Business app (error 2593109) |
+| `alert=app_idle` | Sentry + WhatsApp to ops **and the owner** | Coexistence: no message typed in the Business app for 10 days (the app must be opened every 13 days) |
 | Unverified payments | WhatsApp to the owner, once a day | A reported payment has waited more than 24 h |
 
 Each `alert=` fires once (per menu, per day, or per hour for the backlog), so a problem doesn't spam.
@@ -46,6 +54,8 @@ The owner (or anyone on `OWNER_NUMBERS`) sends `CHATS` to the bot and gets a pri
 The link becomes a cookie scoped to `/admin`, so it isn't left in the address bar. Changing `ADMIN_SECRET` signs everyone out. Removing a number from `OWNER_NUMBERS` stops their links working.
 
 ## Runbook
+
+The go-live runbook (webhook stopped, key rotated, history missing, bot misbehaving, shadow → live) is [runbook.md](./runbook.md). Older notes:
 
 **Bot not replying**
 1. Check `/readyz`. A 503 with `db: error` means the database: check Neon status and `DATABASE_URL`.

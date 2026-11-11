@@ -2,10 +2,11 @@ import { createApp } from "../src/app";
 import { loadConfig } from "../src/config";
 import { connectPglite, type DB } from "../src/db/client";
 import { matchItem } from "../src/domain/order";
-import type { InterpretInput, Interpretation, Llm, ParsedMenu } from "../src/llm/types";
+import type { InterpretInput, Interpretation, Llm, OwnerAction, OwnerInterpretInput, ParsedMenu, ParsedProducts } from "../src/llm/types";
 import type { SheetSink } from "../src/sheets/client";
 import { DryRunWaClient } from "../src/wa/client";
 import { sign } from "../src/wa/signature";
+import { D360_SECRET_HEADER } from "../src/wa/provider/d360";
 import type { Outbound } from "../src/wa/types";
 
 export const OWNER = "+12015550100";
@@ -51,6 +52,39 @@ export class FakeLlm implements Llm {
 
   async parseMenu(): Promise<ParsedMenu> {
     return this.menuResult;
+  }
+
+  /** What the "model" returns for product text the code parser can't read. */
+  productsResult: ParsedProducts = { products: [] };
+  productsCalls: string[] = [];
+
+  async parseProducts(text: string): Promise<ParsedProducts> {
+    this.productsCalls.push(text);
+    return this.productsResult;
+  }
+
+  /** Owner chat: what the "model" returns per lowercased message; anything else is "other". */
+  ownerOverrides = new Map<string, Partial<OwnerAction>>();
+  ownerCalls: OwnerInterpretInput[] = [];
+  ownerError: Error | null = null;
+
+  async interpretOwner(input: OwnerInterpretInput): Promise<OwnerAction> {
+    this.ownerCalls.push(input);
+    if (this.ownerError) throw this.ownerError;
+    const o = this.ownerOverrides.get(input.message.toLowerCase().trim());
+    return {
+      action: "other",
+      products: [],
+      product_ns: [],
+      day: null,
+      dishes: [],
+      remove_dishes: [],
+      copy_from: null,
+      cutoff: null,
+      unknown: [],
+      reply: null,
+      ...o,
+    };
   }
 
   async interpret(input: InterpretInput): Promise<Interpretation> {
@@ -129,13 +163,26 @@ export async function harness(
 
   type In = string | { replyId: string; title?: string } | { templateButton: string; title?: string } | { type: "audio" | "image" };
 
+  /** Signed for the configured provider: Meta HMAC, or 360dialog's shared-secret header. */
+  function authHeaders(raw: string, signature?: string): Record<string, string> {
+    if (cfg.waProvider === "d360") return { [D360_SECRET_HEADER]: signature ?? cfg.waWebhookSecret };
+    return { "x-hub-signature-256": signature ?? sign(raw, cfg.waAppSecret) };
+  }
+
+  /** POST a webhook body as received from the provider; nothing is normalized yet. */
+  async function postRaw(body: unknown, signature?: string, path = "/webhook") {
+    const raw = typeof body === "string" ? body : JSON.stringify(body);
+    return app.request(path, { method: "POST", body: raw, headers: { "content-type": "application/json", ...authHeaders(raw, signature) } });
+  }
+
+  /**
+   * POST a webhook, then run the worker's first step (raw_webhooks → inbox,
+   * statuses, echoes...) so tests can look at inbox rows before handling.
+   */
   async function post(body: unknown, signature?: string) {
-    const raw = JSON.stringify(body);
-    return app.request("/webhook", {
-      method: "POST",
-      body: raw,
-      headers: { "content-type": "application/json", "x-hub-signature-256": signature ?? sign(raw, cfg.waAppSecret) },
-    });
+    const res = await postRaw(body, signature);
+    if (res.status === 200) await worker.ingest();
+    return res;
   }
 
   function payload(from: string, input: In, id = `wamid.${++msgSeq}`) {
@@ -199,5 +246,5 @@ export async function harness(
     return say(phone, address);
   }
 
-  return { cfg, db, wa, llm: fake, clock, app, drain, worker, post, payload, say, postChange, echo, texts, advance, buttonsOf, publishMenu, onboard };
+  return { cfg, db, wa, llm: fake, clock, app, drain, worker, post, postRaw, payload, say, postChange, echo, texts, advance, buttonsOf, publishMenu, onboard };
 }

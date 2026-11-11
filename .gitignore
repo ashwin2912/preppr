@@ -1,7 +1,10 @@
 node_modules
 dist
 .env
+.env.*
+!.env.example
 *.csv
 !test/fixtures/*.csv
 secrets/
 exports/
+.neon

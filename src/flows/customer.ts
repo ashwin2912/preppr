@@ -224,7 +224,8 @@ export async function handleCustomer(ctx: Ctx, msg: Incoming, customer: Customer
   }
 
   if (msg.replyId && /^(confirm|change):/.test(msg.replyId)) {
-    await handleButton(ctx, msg, customer, msg.replyId);
+    // assist: the customer only has these buttons because a summary went out; finish that flow.
+    await handleButton({ ...ctx, assist: true }, msg, customer, msg.replyId);
     return;
   }
   if (await handleMenuOptIn(ctx, msg, customer)) return;
@@ -307,7 +308,10 @@ export async function handleCustomer(ctx: Ctx, msg: Incoming, customer: Customer
       if (lines.length && !unclear.length && it.confidence >= CONFIDENCE_MIN) {
         const wasConfirmed = current?.status === "confirmed";
         const o = await upsertDraft(ctx, menu, phone, lines, it.confidence);
-        await sendOrderSummary(ctx, customer, menu, o, wasConfirmed);
+        // assist: only a confident read goes to the customer; the rest waits for the owner (REVIEW).
+        const sure = (source === "rules" ? 1 : it.confidence) >= ctx.cfg.assistMinConfidence;
+        await sendOrderSummary(sure ? { ...ctx, assist: true } : ctx, customer, menu, o, wasConfirmed);
+        if (!sure && ctx.cfg.botMode === "assist") await ctx.db.update(orders).set({ flagged: true }).where(eq(orders.id, o.id));
         return;
       }
       const attempts = clarifying ? Number(st.context.attempts ?? 0) + 1 : 1;

@@ -1,16 +1,18 @@
 import { and, count, eq, gte } from "drizzle-orm";
 import type { DB } from "../db/client";
-import { customers, inbox, messages, type InboxRow } from "../db/schema";
+import { customers, inbox, messages, rawWebhooks, type InboxRow, type RawWebhookRow } from "../db/schema";
 import type { Ctx } from "../ctx";
 import { log } from "../lib/log";
 import { normalizePhone } from "../lib/phone";
-import { sendText } from "../wa/send";
+import { effectiveMode, isStaff, notifyOps, sendText } from "../wa/send";
 import { recordStatuses } from "../wa/statuses";
-import { InboundMessageSchema, WebhookPayloadSchema, type Incoming, type InboundMessage } from "../wa/types";
+import { type Incoming, type InboundMessage } from "../wa/types";
+import { dedupeKey, detectShape, normalizeInbound, type InboundEvent } from "../wa/normalize";
 import { handleCustomer, sendMenu } from "./customer";
 import { asksToOrder, handleOnboarding, needsOnboarding } from "./onboarding";
 import { recordContacts, recordEchoes, recordHistory } from "./coexistence";
 import { handleOwner } from "./owner";
+import { pingHeld } from "./review";
 import { forwardToOwner } from "./handoff";
 import { getState, tagIntent } from "./state";
 import { ParserUnavailable } from "../llm/types";
@@ -31,62 +33,83 @@ export function toIncoming(m: InboundMessage, phone: string): Incoming {
 }
 
 /**
- * Webhook side: save every inbound message to the inbox. Must finish before
- * the webhook returns 200; a throw means "not saved" and the webhook returns
- * 500 so Meta redelivers. Duplicate deliveries stop at the unique wamid.
+ * Webhook side: save the body exactly as received. Must finish before the
+ * webhook returns 200; a throw means "not saved" and the webhook returns 500
+ * so the provider redelivers. Duplicate deliveries stop at the dedupe key.
+ * Returns true if this delivery is new.
  */
-export async function enqueuePayload(deps: Deps, payload: unknown): Promise<number> {
-  const parsed = WebhookPayloadSchema.safeParse(payload);
-  if (!parsed.success) {
-    log.warn("unrecognized webhook payload", { issues: parsed.error.issues.slice(0, 3) });
-    return 0;
-  }
+export async function storeWebhook(deps: Deps, raw: string, body: unknown): Promise<boolean> {
+  const now = deps.now();
+  const inserted = await deps.db
+    .insert(rawWebhooks)
+    .values({ dedupeKey: dedupeKey(body, raw), provider: deps.cfg.waProvider, shape: detectShape(body), body: body as object, receivedAt: now, createdAt: now, nextAttemptAt: now })
+    .onConflictDoNothing()
+    .returning({ id: rawWebhooks.id });
+  if (!inserted.length) log.info("duplicate webhook ignored");
+  return inserted.length > 0;
+}
+
+/** Worker side: one stored webhook body → inbox rows, statuses, echoes, history, contacts. */
+export async function processWebhook(deps: Deps, row: RawWebhookRow): Promise<number> {
+  return applyEvents(deps, normalizeInbound(row.body), row.receivedAt, row.id);
+}
+
+/**
+ * Acts on normalized events. Every step is idempotent (unique wamids, upserts),
+ * so a retried webhook row or a re-imported file changes nothing twice.
+ * Returns how many customer messages were queued.
+ */
+export async function applyEvents(deps: Deps, events: InboundEvent[], receivedAt: Date, rawId?: number): Promise<number> {
   let queued = 0;
-  for (const entry of parsed.data.entry) {
-    for (const change of entry.changes) {
-      // Coexistence adds fields; only "messages" carries customer messages to route.
-      const field = change.field ?? "messages";
-      if (field === "smb_message_echoes") {
-        await recordEchoes(deps, change.value.message_echoes ?? []);
-        continue;
-      }
-      if (field === "history") {
-        await recordHistory(deps, change.value.history ?? []);
-        continue;
-      }
-      if (field === "smb_app_state_sync") {
-        await recordContacts(deps, change.value.state_sync ?? []);
-        continue;
-      }
-      if (field !== "messages") {
-        log.info("ignored webhook field", { field });
-        continue;
-      }
-      if (change.value.statuses?.length) await recordStatuses(deps, change.value.statuses);
-      for (const raw of change.value.messages ?? []) {
-        const m = InboundMessageSchema.safeParse(raw);
-        if (!m.success) {
-          log.warn("unparseable message", { raw });
-          continue;
-        }
-        const phone = normalizePhone(m.data.from);
-        if (!phone) {
-          log.warn("bad sender number", { from: m.data.from });
-          continue;
-        }
-        const now = deps.now();
-        const profileName = change.value.contacts?.find((c) => c.wa_id === m.data.from)?.profile?.name?.trim().slice(0, 60) || null;
-        const inserted = await deps.db
-          .insert(inbox)
-          .values({ waMessageId: m.data.id, phone, payload: m.data, profileName, createdAt: now, nextAttemptAt: now })
-          .onConflictDoNothing()
-          .returning({ id: inbox.id });
-        if (inserted.length) queued++;
-        else log.info("duplicate delivery ignored", { id: m.data.id });
-      }
+  for (const ev of events) {
+    switch (ev.kind) {
+      case "message":
+        if (await enqueueMessage(deps, ev.message, ev.profileName, receivedAt)) queued++;
+        break;
+      case "status":
+        await recordStatuses(deps, ev.statuses);
+        break;
+      case "echo":
+        await recordEchoes(deps, ev.echoes);
+        break;
+      case "history_batch":
+        await recordHistory(deps, ev.chunks);
+        break;
+      case "contacts_sync":
+        await recordContacts(deps, ev.items);
+        break;
+      case "history_declined":
+        await notifyOps(
+          { ...deps, out: { prefix: `ops:history_declined:${rawId ?? receivedAt.getTime()}`, n: 0 } },
+          "history_declined",
+          "⚠️ WhatsApp history sync was declined in the Business app (error 2593109). Past chats won't be imported; use pnpm import:chat-export if needed.",
+        );
+        break;
+      case "ignored":
+        log.info("ignored webhook field", { field: ev.field });
+        break;
+      case "unknown":
+        log.error("unrecognized webhook payload kept in raw_webhooks", { alert: "webhook_unknown_shape", rawId, reason: ev.reason });
+        break;
     }
   }
   return queued;
+}
+
+/** One customer message into the inbox, stamped with webhook receipt time (exact 24 h window). */
+async function enqueueMessage(deps: Deps, m: InboundMessage, profileName: string | null, receivedAt: Date): Promise<boolean> {
+  const phone = normalizePhone(m.from);
+  if (!phone) {
+    log.warn("bad sender number", { from: m.from });
+    return false;
+  }
+  const inserted = await deps.db
+    .insert(inbox)
+    .values({ waMessageId: m.id, phone, payload: m, profileName, createdAt: receivedAt, nextAttemptAt: deps.now() })
+    .onConflictDoNothing()
+    .returning({ id: inbox.id });
+  if (!inserted.length) log.info("duplicate delivery ignored", { id: m.id });
+  return inserted.length > 0;
 }
 
 export const RATE_LIMIT = { max: 20, windowMs: 10 * 60 * 1000 };
@@ -130,6 +153,7 @@ export async function handleInbound(deps: Deps, row: InboxRow) {
   }
 
   await route(ctx, msg, row.profileName, row.attempts === 1);
+  await pingHeld(ctx, phone, msg.id);
 }
 
 /** Called once an inbox row has used up its retries. */
@@ -147,12 +171,21 @@ export async function inboundFailed(deps: Deps, row: InboxRow, error?: unknown) 
 
 async function route(ctx: Ctx, msg: Incoming, profileName: string | null, firstAttempt: boolean) {
   // Only once the bot will answer: with a shared number, an unread chat is the owner's cue.
-  const markRead = () => {
-    if (firstAttempt) void ctx.wa.markReadTyping(msg.id);
+  const markRead = async () => {
+    if (!firstAttempt) return;
+    // Shadow/assist/BOT OFF: leave the chat unread so the owner sees it in the app.
+    if (!isStaff(ctx, msg.phone) && (await effectiveMode(ctx)) !== "live") return;
+    void ctx.wa.markReadTyping(msg.id);
   };
   if (ctx.cfg.ownerNumbers.includes(msg.phone)) {
-    markRead();
+    await markRead();
     return handleOwner(ctx, msg);
+  }
+
+  if (ctx.cfg.ownerOnly) {
+    log.info("owner-only mode, not an owner", { phone: msg.phone });
+    await tagIntent(ctx, msg.id, "owner_only_ignored");
+    return;
   }
 
   const now = ctx.now();
@@ -177,7 +210,7 @@ async function route(ctx: Ctx, msg: Incoming, profileName: string | null, firstA
     await tagIntent(ctx, msg.id, "unknown_silent");
     return;
   }
-  markRead();
+  await markRead();
 
   // Known customers imported without a name get their WhatsApp profile name.
   if (customer && !customer.name && profileName) {

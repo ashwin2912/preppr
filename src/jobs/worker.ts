@@ -1,15 +1,17 @@
 import { eq } from "drizzle-orm";
-import { inbox, messages, outbox, type InboxRow, type OutboxRow } from "../db/schema";
-import { handleInbound, inboundFailed, type Deps } from "../flows/router";
+import { inbox, messages, outbox, rawWebhooks, type InboxRow, type OutboxRow, type RawWebhookRow } from "../db/schema";
+import { handleInbound, inboundFailed, processWebhook, type Deps } from "../flows/router";
 import { errFields, log } from "../lib/log";
 import { WaSendError } from "../wa/client";
-import { claimInbox, claimOutbox } from "./queue";
+import { claimInbox, claimOutbox, claimRawWebhooks } from "./queue";
 import { sheetSyncer } from "./sheetSync";
+import { runMenuNudge } from "./menuNudge";
 import { runWatchdog } from "./watchdog";
 
 /** Delay before attempt n+1, indexed by attempts so far. Past the end: give up. */
 export const INBOX_BACKOFF_MS = [5_000, 30_000];
 export const OUTBOX_BACKOFF_MS = [2_000, 5_000, 15_000, 60_000, 180_000];
+export const RAW_BACKOFF_MS = [5_000, 30_000, 120_000];
 
 export const SHEET_SYNC_MS = 30_000;
 export const WATCHDOG_MS = 60_000;
@@ -41,6 +43,7 @@ export function createWorker(deps: Deps, opts: WorkerOptions = {}) {
   };
   const d: Deps = { ...deps, kick };
   periodic.push({ name: "watchdog", everyMs: WATCHDOG_MS, run: async () => void (await runWatchdog(d)), last: 0 });
+  periodic.push({ name: "menu_nudge", everyMs: WATCHDOG_MS, run: async () => void (await runMenuNudge(d)), last: 0 });
   if (d.sheets) periodic.push({ name: "sheet_sync", everyMs: SHEET_SYNC_MS, run: sheetSyncer(d), last: 0 });
 
   async function runPeriodic() {
@@ -49,6 +52,26 @@ export function createWorker(deps: Deps, opts: WorkerOptions = {}) {
       if (t - p.last < p.everyMs) continue;
       p.last = t;
       await p.run().catch((e) => log.error("periodic task failed", { task: p.name, ...errFields(e) }));
+    }
+  }
+
+  async function rawRow(row: RawWebhookRow) {
+    try {
+      await processWebhook(d, row);
+      await d.db.update(rawWebhooks).set({ status: "done", lockedUntil: null }).where(eq(rawWebhooks.id, row.id));
+    } catch (e) {
+      const delay = RAW_BACKOFF_MS[row.attempts - 1];
+      if (delay !== undefined) {
+        log.warn("webhook processing failed, will retry", { rawId: row.id, attempt: row.attempts, ...errFields(e) });
+        await d.db
+          .update(rawWebhooks)
+          .set({ status: "pending", lockedUntil: null, lastError: errText(e), nextAttemptAt: new Date(d.now().getTime() + delay) })
+          .where(eq(rawWebhooks.id, row.id));
+        return;
+      }
+      // The body stays in raw_webhooks; `pnpm wa:sync --from-db` or a reset to pending replays it.
+      log.error("webhook processing dead-lettered", { alert: "webhook_dead", rawId: row.id, attempts: row.attempts, ...errFields(e) });
+      await d.db.update(rawWebhooks).set({ status: "failed", lockedUntil: null, lastError: errText(e) }).where(eq(rawWebhooks.id, row.id));
     }
   }
 
@@ -87,7 +110,8 @@ export function createWorker(deps: Deps, opts: WorkerOptions = {}) {
           .set({ status: "pending", lockedUntil: null, lastError: errText(e), nextAttemptAt: new Date(d.now().getTime() + delay) })
           .where(eq(outbox.id, row.id));
       } else {
-        log.error("send dead-lettered", { alert: "send_dead", to: row.to, key: row.idemKey, attempts: row.attempts, retryable, ...errFields(e) });
+        const alert = e instanceof WaSendError && e.kind === "config" ? "send_config" : "send_dead";
+        log.error("send dead-lettered", { alert, to: row.to, key: row.idemKey, attempts: row.attempts, retryable, ...errFields(e) });
         await d.db.update(outbox).set({ status: "failed", lockedUntil: null, lastError: errText(e) }).where(eq(outbox.id, row.id));
       }
       return;
@@ -106,12 +130,21 @@ export function createWorker(deps: Deps, opts: WorkerOptions = {}) {
 
   /** One round: claim and process what's due. Returns how many rows it handled. */
   async function tick(): Promise<number> {
+    // Webhook bodies first, one at a time in arrival order, so the inbox sees messages in order.
+    const raws = await claimRawWebhooks(d.db, d.now(), concurrency);
+    for (const r of raws) await rawRow(r);
     const now = d.now();
     const ins = await claimInbox(d.db, now, concurrency);
     await Promise.all(ins.map(inboxRow));
     const outs = await claimOutbox(d.db, d.now(), concurrency);
     await Promise.all(outs.map(outboxRow));
-    return ins.length + outs.length;
+    return raws.length + ins.length + outs.length;
+  }
+
+  /** Normalize stored webhook bodies only, leaving inbox/outbox alone (tests). */
+  async function ingest() {
+    let raws;
+    while ((raws = await claimRawWebhooks(d.db, d.now(), concurrency)).length) for (const r of raws) await rawRow(r);
   }
 
   /** Process until nothing is due (tests, simulator). */
@@ -152,7 +185,7 @@ export function createWorker(deps: Deps, opts: WorkerOptions = {}) {
     await loop;
   }
 
-  return { tick, drain, start, stop, kick };
+  return { tick, drain, ingest, start, stop, kick };
 }
 
 export type Worker = ReturnType<typeof createWorker>;

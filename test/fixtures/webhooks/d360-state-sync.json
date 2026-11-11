@@ -1,0 +1,26 @@
+{
+  "id": "EVT_SYNC_1",
+  "event": "smb_app_state_sync",
+  "data": {
+    "id": "WABA_ID",
+    "messaging_product": "whatsapp",
+    "metadata": {
+      "display_phone_number": "12015550199",
+      "phone_number_id": "PNID"
+    },
+    "state_sync": [
+      {
+        "type": "contact",
+        "contact": {
+          "full_name": "Alice Rao",
+          "first_name": "Alice",
+          "phone_number": "12015550001"
+        },
+        "action": "add",
+        "metadata": {
+          "timestamp": "1760875200"
+        }
+      }
+    ]
+  }
+}

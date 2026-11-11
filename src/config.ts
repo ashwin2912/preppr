@@ -11,8 +11,15 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().default(8080),
   WA_TOKEN: z.string().default(""),
   WA_PHONE_NUMBER_ID: z.string().default(""),
-  WA_APP_SECRET: z.string().min(1),
-  WA_VERIFY_TOKEN: z.string().min(1),
+  /** meta = Cloud API direct (Graph); d360 = 360dialog (BSP pass-through, coexistence). */
+  WA_PROVIDER: z.enum(["meta", "d360"]).default("meta"),
+  /** meta: app secret for X-Hub-Signature-256 and the GET verify token. Required for meta only. */
+  WA_APP_SECRET: z.string().default(""),
+  WA_VERIFY_TOKEN: z.string().default(""),
+  /** d360: shared secret 360dialog sends back in the X-Preppr-Secret header. Required for d360. */
+  WA_WEBHOOK_SECRET: z.string().default(""),
+  /** meta: WhatsApp Business Account id, for template sync/check. */
+  WA_WABA_ID: z.string().default(""),
   WA_GRAPH_VERSION: z.string().default("v23.0"),
   WA_API_URL: z.string().url().optional(),
   WA_AUTH_HEADER: z.string().default("Authorization"),
@@ -21,6 +28,11 @@ const EnvSchema = z.object({
     .optional()
     .transform((v) => v === "1" || v === "true"),
   UNKNOWN_SENDERS: z.enum(["onboard", "order_only"]).optional(),
+  OWNER_ONLY: z
+    .string()
+    .optional()
+    .transform((v) => v === "1" || v === "true"),
+  ORDER_CHANNEL: z.enum(["bot", "whatsform"]).default("bot"),
   MENU_TEMPLATE: z.string().default("daily_order_open"),
   MENU_TEMPLATE_LANG: z.string().default("en_US"),
   WA_DRY_RUN: z
@@ -28,6 +40,11 @@ const EnvSchema = z.object({
     .optional()
     .transform((v) => v === "1" || v === "true"),
   BOT_NUMBER: z.string().min(1),
+  BOT_MODE: z.enum(["shadow", "assist", "live"]).default("live"),
+  ASSIST_MIN_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.9),
+  OPERATOR_NUMBERS: z.string().default(""),
+  WATCHDOG_NO_INBOUND_MIN: z.coerce.number().int().positive().default(120),
+  SEND_FAIL_THRESHOLD: z.coerce.number().int().positive().default(3),
   DATABASE_URL: z.string().optional(),
   OWNER_NUMBERS: z.string().min(1),
   TZ: z.string().default("America/New_York"),
@@ -50,6 +67,10 @@ const EnvSchema = z.object({
 
 export type Config = {
   port: number;
+  waProvider: "meta" | "d360";
+  /** d360 only: expected value of the X-Preppr-Secret webhook header. */
+  waWebhookSecret: string;
+  waWabaId: string;
   waToken: string;
   waPhoneNumberId: string;
   waAppSecret: string;
@@ -68,11 +89,34 @@ export type Config = {
   coexistence: boolean;
   /** onboard: any new number gets sign-up. order_only: only numbers that ask to order. */
   unknownSenders: "onboard" | "order_only";
+  /** Only owners get answers; everyone else is recorded and ignored (menu assistant on a test number). */
+  ownerOnly: boolean;
+  /**
+   * Where customers order. bot: they message this number. whatsform: they fill in a
+   * WhatsForm form, so publishing gives the owner form lines and a broadcast with the form link,
+   * and the cutoff sends no order summary.
+   */
+  orderChannel: "bot" | "whatsform";
   /** Utility template sent when a customer's 24 h window is closed (coexistence menu push). */
   menuTemplate: string;
   menuTemplateLang: string;
   /** Bot number, digits only (wa.me format). */
   botNumber: string;
+  /**
+   * Rollout mode. shadow: read and record everything, send customers nothing.
+   * assist: send only high-confidence order summaries (and the confirm flow
+   * that follows); everything else waits for the owner (REVIEW). live: normal.
+   * The owner's BOT OFF forces shadow behaviour regardless.
+   */
+  botMode: "shadow" | "assist" | "live";
+  /** assist: minimum parser confidence to send an order summary (rules parser counts as 1). */
+  assistMinConfidence: number;
+  /** E.164; whoever runs the service. Ops alerts go here (and Sentry); always allowed to receive. */
+  operatorNumbers: string[];
+  /** Alert when no webhook arrived for this many minutes while ordering is open. */
+  watchdogNoInboundMin: number;
+  /** Alert when more than this many sends dead-lettered in the last hour. */
+  sendFailThreshold: number;
   databaseUrl?: string;
   /** E.164 */
   ownerNumbers: string[];
@@ -107,6 +151,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (!p) throw new Error(`Invalid OWNER_NUMBERS entry: ${n}`);
     return p;
   });
+  if (e.WA_PROVIDER === "meta" && (!e.WA_APP_SECRET || !e.WA_VERIFY_TOKEN))
+    throw new Error("WA_PROVIDER=meta needs WA_APP_SECRET and WA_VERIFY_TOKEN");
+  if (e.WA_PROVIDER === "d360" && !e.WA_WEBHOOK_SECRET) throw new Error("WA_PROVIDER=d360 needs WA_WEBHOOK_SECRET");
+  const operatorNumbers = csv(e.OPERATOR_NUMBERS).map((n) => {
+    const p = normalizePhone(n);
+    if (!p) throw new Error(`Invalid OPERATOR_NUMBERS entry: ${n}`);
+    return p;
+  });
   const bot = normalizePhone(e.BOT_NUMBER);
   if (!bot) throw new Error(`Invalid BOT_NUMBER: ${e.BOT_NUMBER}`);
   // The bot can't take commands from itself; with coexistence the owner uses a personal number.
@@ -121,6 +173,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (areas.length === 0) throw new Error("AREAS must list at least one area");
   return {
     port: e.PORT,
+    waProvider: e.WA_PROVIDER,
+    waWebhookSecret: e.WA_WEBHOOK_SECRET,
+    waWabaId: e.WA_WABA_ID,
     waToken: e.WA_TOKEN,
     waPhoneNumberId: e.WA_PHONE_NUMBER_ID,
     waAppSecret: e.WA_APP_SECRET,
@@ -131,9 +186,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     waAuthHeader: e.WA_AUTH_HEADER,
     coexistence: e.WA_COEXISTENCE,
     unknownSenders: e.UNKNOWN_SENDERS ?? (e.WA_COEXISTENCE ? "order_only" : "onboard"),
+    ownerOnly: e.OWNER_ONLY,
+    orderChannel: e.ORDER_CHANNEL,
     menuTemplate: e.MENU_TEMPLATE,
     menuTemplateLang: e.MENU_TEMPLATE_LANG,
     botNumber: bot.slice(1),
+    botMode: e.BOT_MODE,
+    assistMinConfidence: e.ASSIST_MIN_CONFIDENCE,
+    operatorNumbers,
+    watchdogNoInboundMin: e.WATCHDOG_NO_INBOUND_MIN,
+    sendFailThreshold: e.SEND_FAIL_THRESHOLD,
     databaseUrl: e.DATABASE_URL,
     ownerNumbers,
     tz: e.TZ,

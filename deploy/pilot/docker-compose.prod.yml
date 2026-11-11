@@ -1,0 +1,70 @@
+# Production pilot: one kitchen on a small VPS (or the laptop), public only via
+# a Cloudflare named tunnel, Postgres on Neon, nightly pg_dump to Cloudflare R2.
+# Step by step: docs/deploy.md. Run from the repo root:
+#   docker compose --env-file .env -f deploy/pilot/docker-compose.prod.yml up -d --build
+# Staging (test number, own tunnel and database), next to prod on the same machine:
+#   ENV_FILE=.env.staging docker compose -p preppr-staging --env-file .env.staging \
+#     -f deploy/pilot/docker-compose.prod.yml up -d --build
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  app:
+    build: ../..
+    env_file: ../../${ENV_FILE:-.env}
+    environment:
+      PORT: "8080"
+      NODE_ENV: production
+    volumes:
+      - ../../secrets:/app/secrets:ro
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging: *logging
+    healthcheck:
+      # /health: 200 while the DB answers (503 otherwise); also what the uptime monitor hits.
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # https://wa.<domain> → http://app:8080 (public hostname set on the tunnel in
+  # the Cloudflare dashboard). No ports are opened on the machine.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.3
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      app:
+        condition: service_healthy
+
+  # Nightly pg_dump of Neon to R2, keeps BACKUP_KEEP_DAYS (default 14).
+  # Without the R2_* vars it stays up and logs "backup DISABLED" every hour,
+  # so the rest of the stack can start before R2 exists.
+  backup:
+    image: postgres:18-alpine
+    entrypoint: ["/bin/sh", "/backup/backup.sh"]
+    volumes:
+      - ./backup:/backup:ro
+    environment:
+      # pg_dump needs a direct (unpooled) connection; falls back to DATABASE_URL off Neon.
+      DATABASE_URL: ${DATABASE_URL_UNPOOLED:-${DATABASE_URL:?set DATABASE_URL in .env}}
+      BACKUP_AT: ${BACKUP_AT:-03:00}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      TZ: ${TZ:-America/New_York}
+      R2_BUCKET: ${R2_BUCKET:-}
+      RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      RCLONE_CONFIG_R2_ENDPOINT: https://${R2_ACCOUNT_ID:-}.r2.cloudflarestorage.com
+      RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
+    restart: unless-stopped
+    logging: *logging

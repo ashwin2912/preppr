@@ -1,13 +1,18 @@
 import { z } from "zod";
 import { log } from "../lib/log";
-import { buildInterpretPrompt, INTERPRET_SYSTEM, MENU_SYSTEM } from "./prompts";
+import { buildInterpretPrompt, buildOwnerPrompt, INTERPRET_SYSTEM, MENU_SYSTEM, OWNER_SYSTEM, PRODUCTS_SYSTEM } from "./prompts";
 import {
   InterpretationSchema,
+  OwnerActionSchema,
   ParsedMenuSchema,
+  ParsedProductsSchema,
   type InterpretInput,
   type Interpretation,
   type Llm,
+  type OwnerAction,
+  type OwnerInterpretInput,
   type ParsedMenu,
+  type ParsedProducts,
 } from "./types";
 
 type Msg = { role: "system" | "user" | "assistant"; content: string };
@@ -83,8 +88,16 @@ export class OpenAiCompatLlm implements Llm {
     return this.structured(MENU_SYSTEM, `<menu>\n${text}\n</menu>`, ParsedMenuSchema, fillMenu);
   }
 
+  parseProducts(text: string): Promise<ParsedProducts> {
+    return this.structured(PRODUCTS_SYSTEM, `<products>\n${text}\n</products>`, ParsedProductsSchema, fillProducts);
+  }
+
   interpret(input: InterpretInput): Promise<Interpretation> {
     return this.structured(INTERPRET_SYSTEM, buildInterpretPrompt(input), InterpretationSchema, fillInterpretation);
+  }
+
+  interpretOwner(input: OwnerInterpretInput): Promise<OwnerAction> {
+    return this.structured(OWNER_SYSTEM, buildOwnerPrompt(input), OwnerActionSchema, fillOwnerAction);
   }
 }
 
@@ -118,6 +131,23 @@ function fillMenu(raw: unknown): unknown {
   };
 }
 
+function fillProducts(raw: unknown): unknown {
+  if (!isObj(raw)) return raw;
+  const products = Array.isArray(raw.products) ? raw.products : [];
+  return {
+    ...raw,
+    products: products.map((p) =>
+      isObj(p)
+        ? {
+            aliases: [],
+            ...p,
+            sizes: (Array.isArray(p.sizes) ? p.sizes : []).map((z) => (isObj(z) ? { ...z, label: String(z.label ?? ""), price_cents: num(z.price_cents) } : z)),
+          }
+        : p,
+    ),
+  };
+}
+
 function fillInterpretation(raw: unknown): unknown {
   if (!isObj(raw)) return raw;
   const lines = Array.isArray(raw.lines) ? raw.lines : [];
@@ -130,5 +160,24 @@ function fillInterpretation(raw: unknown): unknown {
     ...raw,
     confidence: num(raw.confidence),
     lines: lines.map((l) => (isObj(l) ? { note: null, ...l, item_id: String(l.item_id), qty: num(l.qty) } : l)),
+  };
+}
+
+function fillOwnerAction(raw: unknown): unknown {
+  if (!isObj(raw)) return raw;
+  const picks = (v: unknown) =>
+    (Array.isArray(v) ? v : []).map((d) => (isObj(d) ? { ...d, n: num(d.n), sizes: Array.isArray(d.sizes) ? d.sizes.map(String) : [] } : d));
+  const products = fillProducts({ products: raw.products }) as Obj;
+  return {
+    day: null,
+    copy_from: null,
+    cutoff: null,
+    reply: null,
+    ...raw,
+    products: products.products,
+    product_ns: (Array.isArray(raw.product_ns) ? raw.product_ns : []).map(num),
+    dishes: picks(raw.dishes),
+    remove_dishes: picks(raw.remove_dishes),
+    unknown: Array.isArray(raw.unknown) ? raw.unknown.map(String) : [],
   };
 }

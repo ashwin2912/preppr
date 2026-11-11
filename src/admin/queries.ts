@@ -105,7 +105,7 @@ export type Bubble =
       dir: "out";
       at: Date;
       msg: Outbound;
-      queue: "pending" | "processing" | "done" | "failed";
+      queue: "pending" | "processing" | "done" | "failed" | "suppressed";
       delivery: "sent" | "delivered" | "read" | "failed" | null;
       error: string | null;
     };

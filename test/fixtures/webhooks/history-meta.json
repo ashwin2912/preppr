@@ -1,0 +1,45 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "WABA_ID",
+      "changes": [
+        {
+          "field": "history",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "12015550199",
+              "phone_number_id": "PNID"
+            },
+            "history": [
+              {
+                "metadata": {
+                  "phase": 0,
+                  "chunk_order": 1,
+                  "progress": 100
+                },
+                "threads": [
+                  {
+                    "id": "12015550001",
+                    "messages": [
+                      {
+                        "id": "wamid.fx.h1",
+                        "from": "12015550001",
+                        "timestamp": "1760875200",
+                        "type": "text",
+                        "text": {
+                          "body": "3 roti please"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

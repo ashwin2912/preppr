@@ -1,7 +1,7 @@
 import { and, count, eq, isNull } from "drizzle-orm";
-import { conversationState, customers, menus, orders, type Menu } from "../db/schema";
+import { conversationState, customers, menus, type Menu } from "../db/schema";
 import type { Ctx } from "../ctx";
-import { buildMenu, currentMenu, formatBroadcast, formatMenuPreview, ownerMenu } from "../domain/menu";
+import { buildMenu, currentMenu, formatBroadcast, ownerMenu } from "../domain/menu";
 import { buildOrdersList, buildSummary, loadSummaryData } from "../domain/summary";
 import { errFields, log } from "../lib/log";
 import { normalizePhone, waLink } from "../lib/phone";
@@ -9,19 +9,55 @@ import { formatClock, formatDay, localDate, parseClock, zonedInstant } from "../
 import { send, sendLongText, sendText } from "../wa/send";
 import { InboundMessageSchema, type Incoming } from "../wa/types";
 import { importCustomers, parseSharedContacts } from "../domain/importCustomers";
-import { signViewerToken } from "../admin/auth";
+import { KITCHEN_LINK_TTL_MS, signViewerToken } from "../admin/auth";
 import { cmdAdd, cmdSetField } from "./customerAdmin";
 import { cmdBalance, cmdBlock, cmdDues, cmdPaid, cmdPending, settlePayment } from "./payments";
 import { tagIntent } from "./state";
 import { pushMenu, STARTER_LIMIT } from "../jobs/menuPush";
+import { cmdBot, cmdReview, modeBanner } from "./review";
+import { cmdAddProducts, cmdCatalogMenu, cmdLink, cmdProducts, cmdRemoveProduct, copyMenuTo, handleCatalogButton, sendFormKit } from "./catalog";
+import { kvDelete } from "../db/kv";
+import { ownerCtxKey, saveDraftMenu } from "./menuDraft";
+import { CHAT_EXAMPLES, handleOwnerChat, type ChatCommand } from "./ownerChat";
+import { cmdFormOrders, cmdHow, cmdMessage, cmdWhat } from "./ownerDay";
 
-export const HELP = `*Owner commands*
+/** What the owner sees for /help in the WhatsForm flow: plain chat for dishes and menus, then the day commands. */
+export const DAY_HELP = `*Your dishes and today's menu*
+${CHAT_EXAMPLES}
+
+*Your day*
+/products — your dishes with numbers
+/how — today at a glance: orders, sales, menu
+/what — how much of each dish to make
+/orders — who ordered what
+/message — today's broadcast message to forward
+/app — your kitchen page (orders and totals; dishes and menu too)`;
+
+/** The menu-assistant commands (product list, daily menu, WhatsForm). */
+export const PRODUCT_HELP = `*Products & menu*
+${CHAT_EXAMPLES}
+
+Or with commands:
+/products — your dishes with sizes and prices
+/add-product Dal 8oz 6, 16oz 10 — add dishes (one per line; Roti 1 each for no sizes)
+/edit-product 3 8oz 7, 16oz 11 — change a dish's sizes/prices (number from /products)
+/remove-product 3 — take a dish off the list
+/app — open your kitchen page: add dishes and sizes, make the menu, copy the WhatsForm lines
+/menu 1 3 5 cutoff 10:30 — today's menu from your products (or /menu dal, roti; /menu tomorrow: …)
+/link <form link> — put today's WhatsForm link into the broadcast
+/help — this list`;
+
+export const HELP = `${PRODUCT_HELP}
+
+*Owner commands*
 MENU <menu text> — set a menu, e.g. MENU Mon: Dal makhani 6, Jeera rice 4, Roti 1 each. Cutoff 10:30
 SUMMARY — full report for today
 ORDERS — quick list of orders so far
 CLOSE — stop taking orders now and send the summary
 OPEN [time] — reopen ordering until time (default: 30 min from now)
 RESUME <number> — turn the bot back on for a customer (also after you reply to them yourself)
+BOT OFF / BOT ON — stop or restart all bot replies to customers (it keeps recording orders)
+REVIEW — orders and messages the bot wasn't sure about
 
 *Customers*
 ADD <number> [name] — add a regular; they skip the sign-up questions
@@ -40,13 +76,19 @@ CHATS [number] — private link to read the bot's conversations (works 12 h)
 HELP — this list`;
 
 const OPEN_DEFAULT_MS = 30 * 60 * 1000;
+/** Returned by a command handler when the text isn't really that command: read it as plain chat. */
+const NOT_A_COMMAND = Symbol("not a command");
 
 export async function sendSummary(ctx: Ctx, to: string, menu: Menu): Promise<boolean> {
   const { rows, handoffs } = await loadSummaryData(ctx.db, menu, ctx.cfg.tz);
-  return sendLongText(ctx, to, buildSummary(menu, rows, handoffs, ctx.cfg));
+  return sendLongText(ctx, to, (await modeBanner(ctx)) + buildSummary(menu, rows, handoffs, ctx.cfg));
 }
 
-async function cmdMenu(ctx: Ctx, phone: string, text: string) {
+async function cmdMenu(ctx: Ctx, phone: string, text: string): Promise<unknown> {
+  // With a product list, MENU picks dishes from it; free-text menus are for kitchens without one.
+  const r = await cmdCatalogMenu(ctx, phone, text);
+  if (r === "chat") return NOT_A_COMMAND;
+  if (r) return;
   if (!text) {
     await sendText(ctx, phone, "Send the menu after the word MENU, e.g.\nMENU Mon: Dal makhani 6, Jeera rice 4, Roti 1 each. Cutoff 10:30");
     return;
@@ -63,33 +105,7 @@ async function cmdMenu(ctx: Ctx, phone: string, text: string) {
     await sendText(ctx, phone, "I couldn't find any items with prices. Try: MENU Mon: Dal makhani 6, Roti 1. Cutoff 10:30");
     return;
   }
-  const [existing] = await ctx.db.select().from(menus).where(eq(menus.date, built.date));
-  if (existing && existing.status !== "draft") {
-    const [{ n }] = (await ctx.db.select({ n: count() }).from(orders).where(eq(orders.menuId, existing.id))) as [{ n: number }];
-    if (n > 0) {
-      await sendText(
-        ctx,
-        phone,
-        `The menu for ${formatDay(built.date, ctx.cfg.tz)} is already published and has ${n} order(s), so I can't replace it. Use OPEN/CLOSE to change the cutoff.`,
-      );
-      return;
-    }
-  }
-  const values = { items: built.items, cutoffAt: built.cutoffAt, status: "draft" as const, summarySentAt: null };
-  const [m] = await ctx.db
-    .insert(menus)
-    .values({ date: built.date, createdAt: ctx.now(), ...values })
-    .onConflictDoUpdate({ target: menus.date, set: values })
-    .returning();
-  await send(ctx, {
-    kind: "buttons",
-    to: phone,
-    body: formatMenuPreview(m!, ctx.cfg, built.cutoffWasDefault),
-    buttons: [
-      { id: `menu_publish:${m!.id}`, title: "Publish" },
-      { id: `menu_edit:${m!.id}`, title: "Edit" },
-    ],
-  });
+  await saveDraftMenu(ctx, phone, built);
 }
 
 async function publish(ctx: Ctx, phone: string, menuId: number) {
@@ -102,11 +118,14 @@ async function publish(ctx: Ctx, phone: string, menuId: number) {
     }
     // Only one menu per date exists, so publishing can't collide with another active one for the same day.
     const [pub] = await ctx.db.update(menus).set({ status: "active" }).where(eq(menus.id, m.id)).returning();
+    await kvDelete(ctx.db, ownerCtxKey(phone));
+    if (ctx.cfg.orderChannel === "whatsform") return sendFormKit(ctx, phone, pub!);
     if (ctx.cfg.coexistence) return offerPush(ctx, phone, pub!);
     await sendText(ctx, phone, `✅ Published. Orders open until ${formatClock(m.cutoffAt, ctx.cfg.tz)}.\nForward the next message to your broadcast lists 👇`);
     await sendText(ctx, phone, formatBroadcast(pub!, ctx.cfg));
     return;
   }
+  if (ctx.cfg.orderChannel === "whatsform") return sendFormKit(ctx, phone, m);
   if (ctx.cfg.coexistence) return offerPush(ctx, phone, m);
   await sendText(ctx, phone, `This menu is already ${m.status}. Here's the broadcast again 👇`);
   await sendText(ctx, phone, formatBroadcast(m, ctx.cfg));
@@ -197,6 +216,14 @@ async function cmdResume(ctx: Ctx, phone: string, arg: string) {
   await sendText(ctx, phone, `Bot is back on for ${res[0]!.name ?? target}.`);
 }
 
+/** APP: private link to the kitchen page (dishes, menu, WhatsForm lines), valid 30 days. */
+async function cmdApp(ctx: Ctx, phone: string) {
+  const { publicUrl, adminSecret } = ctx.cfg;
+  if (!publicUrl || !adminSecret) return sendText(ctx, phone, "The kitchen page isn't set up yet (needs PUBLIC_URL and ADMIN_SECRET).");
+  const params = new URLSearchParams({ t: signViewerToken(adminSecret, phone, ctx.now(), KITCHEN_LINK_TTL_MS), next: "/admin/kitchen" });
+  await sendText(ctx, phone, `Your kitchen page 👇 (private link, works for 30 days — don't forward it)\n${publicUrl}/admin?${params}`);
+}
+
 async function cmdChats(ctx: Ctx, phone: string, arg: string) {
   const { publicUrl, adminSecret } = ctx.cfg;
   if (!publicUrl || !adminSecret) return sendText(ctx, phone, "The chat viewer isn't set up yet (needs PUBLIC_URL and ADMIN_SECRET).");
@@ -227,10 +254,14 @@ export async function handleOwner(ctx: Ctx, msg: Incoming) {
     const [kind, id] = msg.replyId.split(":");
     await tagIntent(ctx, msg.id, `owner_${kind}`);
     if (kind === "menu_publish") return publish(ctx, phone, Number(id));
-    if (kind === "menu_edit") return sendText(ctx, phone, "Send the corrected menu as a new MENU message.");
+    if (kind === "menu_edit")
+      return sendText(ctx, phone, "What should I change? e.g. *add samosa*, *no rice*, *only 16oz dal*, *cutoff 11*, or send the whole menu again.");
+    if (kind === "menu_copy") return copyNudgedMenu(ctx, phone, Number(id));
+    if (kind === "show_products") return cmdProducts(ctx, phone);
     if (kind === "menu_push") return cmdPush(ctx, phone, Number(id));
     if (kind === "menu_nopush") return sendText(ctx, phone, "OK, not sent. Tap Send menu above any time before the cutoff.");
     if (kind === "pay_ok" || kind === "pay_no") return settlePayment(ctx, phone, Number(id), kind === "pay_ok");
+    await handleCatalogButton(ctx, phone, kind ?? "", id ?? "");
     return;
   }
   if (msg.type === "contacts") {
@@ -242,7 +273,26 @@ export async function handleOwner(ctx: Ctx, msg: Incoming) {
   const cmd = word.toUpperCase().replace(/[^A-Z]/g, "");
   const arg = text.slice(word.length).trim();
   await tagIntent(ctx, msg.id, `owner_${cmd.toLowerCase() || msg.type}`);
+  if (await runCommand(ctx, phone, cmd, arg, msg)) return;
 
+  // Not a command word: plain chat about dishes and menus.
+  const next = text ? await handleOwnerChat(ctx, phone, text, msg.id) : "HELP";
+  if (next) await runCommand(ctx, phone, next, "", msg);
+}
+
+/** Nudge button "Same as Mon": that menu again for today. */
+async function copyNudgedMenu(ctx: Ctx, phone: string, menuId: number) {
+  const [src] = await ctx.db.select().from(menus).where(eq(menus.id, menuId));
+  if (!src) return sendText(ctx, phone, "That menu no longer exists. Tell me today's dishes, e.g. *today dal, paneer, roti*.");
+  await copyMenuTo(ctx, phone, src, localDate(ctx.now(), ctx.cfg.tz));
+}
+
+/** Exact owner commands; false when `cmd` isn't one (the caller then reads it as chat). */
+async function runCommand(ctx: Ctx, phone: string, cmd: ChatCommand | string, arg: string, msg: Incoming): Promise<boolean> {
+  return (await dispatch(ctx, phone, cmd, arg, msg)) !== NOT_A_COMMAND;
+}
+
+async function dispatch(ctx: Ctx, phone: string, cmd: string, arg: string, msg: Incoming): Promise<unknown> {
   switch (cmd) {
     case "MENU":
       return cmdMenu(ctx, phone, arg);
@@ -252,7 +302,15 @@ export async function handleOwner(ctx: Ctx, msg: Incoming) {
       await sendSummary(ctx, phone, m);
       return;
     }
+    case "HOW":
+      return cmdHow(ctx, phone);
+    case "WHAT":
+      return cmdWhat(ctx, phone);
+    case "MESSAGE":
+    case "BROADCAST":
+      return cmdMessage(ctx, phone);
     case "ORDERS": {
+      if (ctx.cfg.orderChannel === "whatsform") return cmdFormOrders(ctx, phone);
       const m = await ownerMenu(ctx.db, ctx.now(), ctx.cfg.tz);
       if (!m) return sendText(ctx, phone, "No published menu yet.");
       const { rows } = await loadSummaryData(ctx.db, m, ctx.cfg.tz);
@@ -265,11 +323,44 @@ export async function handleOwner(ctx: Ctx, msg: Incoming) {
       return cmdOpen(ctx, phone, arg);
     case "RESUME":
       return cmdResume(ctx, phone, arg);
+    case "BOT":
+      return cmdBot(ctx, phone, arg);
+    case "REVIEW":
+      return cmdReview(ctx, phone);
     case "CHATS":
     case "CHAT":
       return cmdChats(ctx, phone, arg);
+    case "PRODUCTS":
+    case "PRODUCT":
+    case "ITEMS":
+      return cmdProducts(ctx, phone);
+    case "ADDPRODUCT":
+    case "ADDPRODUCTS":
+    case "ADDITEM":
+    case "ADDITEMS":
+    case "ADDDISH":
+      return cmdAddProducts(ctx, phone, arg, msg.id, false);
+    case "EDITPRODUCT":
+    case "EDITITEM":
+    case "EDITDISH":
+      return cmdAddProducts(ctx, phone, arg, msg.id, true);
+    case "REMOVEPRODUCT":
+    case "REMOVEITEM":
+    case "DELETEPRODUCT":
+    case "REMOVEDISH":
+      return cmdRemoveProduct(ctx, phone, arg);
+    case "LINK":
+      return cmdLink(ctx, phone, arg);
+    case "APP":
+    case "DASHBOARD":
+    case "KITCHEN":
+    case "PAGE":
+      return cmdApp(ctx, phone);
     case "ADD":
-      return cmdAdd(ctx, phone, arg);
+      // "ADD +1201… Name" is a customer; "ADD Dal 8oz 6" a dish; "add samosa" (no price) is chat: onto the menu.
+      if (!/^[a-z]/i.test(arg)) return cmdAdd(ctx, phone, arg);
+      if (!/\d/.test(arg)) return NOT_A_COMMAND;
+      return cmdAddProducts(ctx, phone, arg, msg.id, false);
     case "NAME":
       return cmdSetField(ctx, phone, arg, "name");
     case "AREA":
@@ -293,7 +384,12 @@ export async function handleOwner(ctx: Ctx, msg: Incoming) {
     case "BLOCK":
     case "UNBLOCK":
       return cmdBlock(ctx, phone, arg, cmd === "BLOCK");
+    case "HELP":
+    case "COMMANDS":
+      // Menu assistant (WhatsForm flow): the short list, unless they ask for everything.
+      if (ctx.cfg.orderChannel === "whatsform" && !/^all$/i.test(arg)) return sendText(ctx, phone, DAY_HELP);
+      return sendText(ctx, phone, HELP);
     default:
-      await sendText(ctx, phone, HELP);
+      return NOT_A_COMMAND;
   }
 }

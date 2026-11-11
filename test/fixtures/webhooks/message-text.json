@@ -1,0 +1,39 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "WABA_ID",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "12015550199",
+              "phone_number_id": "PNID"
+            },
+            "contacts": [
+              {
+                "wa_id": "12015550001",
+                "profile": {
+                  "name": "Alice R"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "id": "wamid.fx.text",
+                "from": "12015550001",
+                "timestamp": "1760875200",
+                "type": "text",
+                "text": {
+                  "body": "2 dal"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

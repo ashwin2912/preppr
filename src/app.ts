@@ -1,12 +1,16 @@
-import { Hono } from "hono";
-import { enqueuePayload, type Deps } from "./flows/router";
+import { Hono, type Context } from "hono";
+import { storeWebhook, type Deps } from "./flows/router";
 import { runCutoff } from "./jobs/cutoff";
 import { sql } from "drizzle-orm";
 import { backlog } from "./jobs/watchdog";
 import { createWorker, type WorkerOptions } from "./jobs/worker";
 import { registerAdmin } from "./admin/routes";
+import { registerFormWebhook } from "./flows/formOrders";
+import { registerFormMenu } from "./flows/formMenu";
 import { errFields, log } from "./lib/log";
-import { secretEquals, verifySignature } from "./wa/signature";
+import { secretEquals } from "./wa/signature";
+import { verifyInbound } from "./wa/provider";
+import { healthReport } from "./jobs/watchdog";
 
 export function createApp(baseDeps: Deps, workerOpts?: WorkerOptions) {
   const app = new Hono();
@@ -30,19 +34,32 @@ export function createApp(baseDeps: Deps, workerOpts?: WorkerOptions) {
     }
   });
 
-  app.get("/webhook", (c) => {
+  // For an uptime monitor: database, last webhook, queue depths, mode. 503 only if the DB is down.
+  app.get("/health", async (c) => {
+    try {
+      return c.json({ ok: true, ...(await healthReport(deps)) });
+    } catch (e) {
+      log.error("health failed", errFields(e));
+      return c.json({ ok: false, db: "error" }, 503);
+    }
+  });
+
+  // Meta's subscribe challenge. 360dialog sets the URL by API instead (pnpm wa:webhook:set).
+  const verifyGet = (c: Context) => {
     const mode = c.req.query("hub.mode");
     const token = c.req.query("hub.verify_token");
     const challenge = c.req.query("hub.challenge");
-    if (mode === "subscribe" && secretEquals(token, deps.cfg.waVerifyToken) && challenge) return c.text(challenge);
+    if (deps.cfg.waProvider === "meta" && mode === "subscribe" && secretEquals(token, deps.cfg.waVerifyToken) && challenge) return c.text(challenge);
     return c.text("forbidden", 403);
-  });
+  };
 
-  app.post("/webhook", async (c) => {
+  // Store the body as received, ack, and let the worker normalize it (src/wa/normalize.ts).
+  const receive = async (c: Context) => {
     const raw = await c.req.text();
-    if (!verifySignature(raw, c.req.header("x-hub-signature-256"), deps.cfg.waAppSecret)) {
-      log.warn("bad webhook signature");
-      return c.text("bad signature", 401);
+    if (!verifyInbound(deps.cfg, (h) => c.req.header(h), raw)) {
+      // ERROR so Sentry counts them (one issue, fingerprinted on message + alert).
+      log.error("webhook rejected: bad signature or secret", { alert: "webhook_auth_rejected", provider: deps.cfg.waProvider });
+      return c.text("unauthorized", 401);
     }
     let body: unknown;
     try {
@@ -51,22 +68,33 @@ export function createApp(baseDeps: Deps, workerOpts?: WorkerOptions) {
       return c.text("bad json", 400);
     }
     try {
-      if (await enqueuePayload(deps, body)) worker.kick();
+      if (await storeWebhook(deps, raw, body)) worker.kick();
     } catch (e) {
-      // Not saved: a non-2xx makes Meta redeliver.
-      log.error("enqueue failed", errFields(e));
+      // Not saved: a non-2xx makes the provider redeliver.
+      log.error("webhook store failed", errFields(e));
       return c.text("try again", 500);
     }
     return c.text("ok");
-  });
+  };
+
+  // /webhooks/whatsapp is the 360dialog URL (no underscores or ports allowed); /webhook stays for Meta.
+  for (const path of ["/webhook", "/webhooks/whatsapp"]) {
+    app.get(path, verifyGet);
+    app.post(path, receive);
+  }
 
   registerAdmin(app, deps);
+  registerFormWebhook(app, deps);
+  registerFormMenu(app, deps);
 
-  app.post("/jobs/cutoff", async (c) => {
-    if (!secretEquals(c.req.header("x-job-secret"), deps.cfg.jobSecret)) return c.text("forbidden", 403);
-    const result = await runCutoff(deps);
-    return c.json(result);
-  });
+  // X-Job-Secret (original) or Authorization: Bearer (Cloudflare Worker cron).
+  const cutoff = async (c: Context) => {
+    const bearer = c.req.header("authorization")?.replace(/^Bearer\s+/i, "");
+    if (!secretEquals(c.req.header("x-job-secret"), deps.cfg.jobSecret) && !secretEquals(bearer, deps.cfg.jobSecret)) return c.text("forbidden", 403);
+    return c.json(await runCutoff(deps));
+  };
+  app.post("/jobs/cutoff", cutoff);
+  app.post("/internal/cutoff", cutoff);
 
   return { app, drain: worker.drain, worker };
 }

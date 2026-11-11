@@ -6,6 +6,7 @@ import type { ParsedMenu } from "../llm/types";
 import { waLink } from "../lib/phone";
 import { formatClock, formatDay, localDate, parseClock, resolveMenuDate, zonedInstant } from "../lib/time";
 import { money } from "./order";
+import { formatSizes, shortMoney } from "./products";
 
 export type BuiltMenu = { date: string; cutoffAt: Date; items: MenuItem[]; cutoffWasDefault: boolean };
 
@@ -35,7 +36,7 @@ export function formatMenuPreview(m: Pick<Menu, "date" | "cutoffAt" | "items">, 
   return (
     `*Menu preview — ${formatDay(m.date, cfg.tz)}*\n\n${itemList(m.items)}\n\n` +
     `Cutoff: ${formatClock(m.cutoffAt, cfg.tz)}${cutoffWasDefault ? " (default)" : ""}\n\n` +
-    `Tap Publish to open ordering, or Edit to send a corrected MENU.`
+    `Tap Publish, or tell me what to change (e.g. *add samosa*, *no rice*, *cutoff 11*).`
   );
 }
 
@@ -80,4 +81,30 @@ export async function ownerMenu(db: Q, now: Date, tz: string): Promise<Menu | nu
   if (t) return t;
   const [latest] = await db.select().from(menus).where(ne(menus.status, "draft")).orderBy(desc(menus.date)).limit(1);
   return latest ?? null;
+}
+
+/** "Dal – 8oz" for a catalog line, the plain name otherwise. */
+export const formLabel = (i: MenuItem) => {
+  if (!i.size) return i.name;
+  const product = i.name.endsWith(` ${i.size}`) ? i.name.slice(0, -i.size.length - 1) : i.name;
+  return `${product} – ${i.size}`;
+};
+
+/** Broadcast for the WhatsForm flow: dishes grouped with their sizes, cutoff (unless left out), and the form link (or [LINK]). */
+export function formatFormBroadcast(m: Pick<Menu, "date" | "cutoffAt" | "items">, cfg: Config, link: string | null, showCutoff = true): string {
+  const groups = new Map<string, MenuItem[]>();
+  for (const i of m.items) {
+    const key = i.product_id !== undefined ? `p${i.product_id}` : i.id;
+    groups.set(key, [...(groups.get(key) ?? []), i]);
+  }
+  const lines = [...groups.values()].map((g) => {
+    const first = g[0]!;
+    if (!first.size) return `• ${first.name} — ${shortMoney(first.price_cents)}`;
+    const name = first.name.endsWith(` ${first.size}`) ? first.name.slice(0, -first.size.length - 1) : first.name;
+    return `• ${name} — ${formatSizes(g.map((i) => ({ label: i.size!, price_cents: i.price_cents })))}`;
+  });
+  return (
+    `🍛 *${cfg.kitchenName} — ${formatDay(m.date, cfg.tz)}*\n\n${lines.join("\n")}\n\n` +
+    `${showCutoff ? `Order by ${formatClock(m.cutoffAt, cfg.tz)}` : "Order here"} 👉 ${link ?? "[LINK]"}`
+  );
 }

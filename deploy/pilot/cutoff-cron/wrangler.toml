@@ -9,6 +9,6 @@ workers_dev = false
 crons = ["*/5 13-19 * * *"]
 
 [vars]
-PUBLIC_URL = "https://bot.example.com"   # same as PUBLIC_URL in the app's .env
+PUBLIC_URL = "https://wa.ashwindhanasamy.com"   # same as PUBLIC_URL in the app's .env
 
 # Secret (not in this file): npx wrangler secret put JOB_SECRET

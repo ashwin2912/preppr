@@ -50,6 +50,27 @@
       "when": 1793237790261,
       "tag": "0006_fat_quicksilver",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793890486098,
+      "tag": "0007_absent_shiva",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794054560290,
+      "tag": "0008_yellow_boom_boom",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794063409303,
+      "tag": "0009_perpetual_joseph",
+      "breakpoints": true
     }
   ]
 }

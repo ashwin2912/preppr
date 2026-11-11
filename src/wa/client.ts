@@ -1,21 +1,9 @@
 import { toWaId } from "../lib/phone";
 import { log } from "../lib/log";
 import type { Outbound } from "./types";
+import { classifySendError, WaSendError } from "./errors";
 
-/** Graph API codes worth retrying: throughput limit, pair rate limit, temporary error. */
-const RETRYABLE_CODES = new Set([130429, 131056, 131000, 2]);
-
-export class WaSendError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly code: number | null,
-    readonly retryable: boolean,
-  ) {
-    super(message);
-    this.name = "WaSendError";
-  }
-}
+export { WaSendError } from "./errors";
 
 export interface WaClient {
   /** Returns the outbound wamid. */
@@ -110,11 +98,7 @@ export class GraphWaClient implements WaClient {
       body: JSON.stringify(body),
     });
     const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const code = typeof json?.error?.code === "number" ? json.error.code : null;
-      const retryable = res.status >= 500 || res.status === 429 || (code !== null && RETRYABLE_CODES.has(code));
-      throw new WaSendError(`Graph API ${res.status}: ${JSON.stringify(json)}`, res.status, code, retryable);
-    }
+    if (!res.ok) throw classifySendError("Graph API", res.status, json);
     return json;
   }
 

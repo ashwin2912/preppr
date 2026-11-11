@@ -4,3 +4,6 @@ dist
 *.csv
 .git
 secrets/
+.env.*
+!.env.example
+.neon

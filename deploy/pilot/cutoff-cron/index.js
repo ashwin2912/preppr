@@ -8,9 +8,9 @@ export default {
 };
 
 async function runCutoff(env) {
-  const res = await fetch(`${env.PUBLIC_URL}/jobs/cutoff`, {
+  const res = await fetch(`${env.PUBLIC_URL}/internal/cutoff`, {
     method: "POST",
-    headers: { "X-Job-Secret": env.JOB_SECRET },
+    headers: { Authorization: `Bearer ${env.JOB_SECRET}` },
   });
   if (!res.ok) throw new Error(`cutoff failed: ${res.status} ${await res.text()}`);
 }

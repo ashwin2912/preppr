@@ -18,7 +18,13 @@ export type MenuItem = {
   name: string;
   price_cents: number;
   aliases: string[];
+  /** Set when the menu was built from the product list: which product and size this line is. */
+  product_id?: number;
+  size?: string;
 };
+
+/** One size of a product with its price. A dish without sizes has one, labelled with its unit ("each"). */
+export type ProductSize = { label: string; price_cents: number };
 
 export type OrderLine = {
   item_id: string;
@@ -90,6 +96,19 @@ export const menus = pgTable("menus", {
   createdAt: ts("created_at").notNull().defaultNow(),
 });
 
+/** The kitchen's standing product list (dishes and their sizes); daily menus are picked from it. */
+export const products = pgTable("products", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  /** Lowercased, single-spaced name: one product per name. */
+  nameKey: text("name_key").notNull().unique(),
+  sizes: jsonb("sizes_json").$type<ProductSize[]>().notNull(),
+  aliases: jsonb("aliases").$type<string[]>().notNull().default([]),
+  active: boolean("active").notNull().default(true),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
 export const orders = pgTable(
   "orders",
   {
@@ -111,6 +130,33 @@ export const orders = pgTable(
     updatedAt: ts("updated_at").notNull().defaultNow(),
   },
   (t) => [unique("orders_menu_customer").on(t.menuId, t.customerPhone)],
+);
+
+/**
+ * One WhatsForm submission (webhook on Submit). Separate from `orders`: a customer
+ * can send several forms a day, and lines are matched from form question keys.
+ */
+export const formResponses = pgTable(
+  "form_responses",
+  {
+    id: serial("id").primaryKey(),
+    /** WhatsForm's response number when sent, else a hash of the body: redeliveries dedupe. */
+    responseKey: text("response_key").notNull().unique(),
+    menuId: integer("menu_id").references(() => menus.id),
+    customerPhone: text("customer_phone").references(() => customers.phone),
+    name: text("name"),
+    area: text("area"),
+    address: text("address"),
+    note: text("note"),
+    lines: jsonb("lines_json").$type<OrderLine[]>().notNull(),
+    totalCents: integer("total_cents").notNull(),
+    /** Form fields that matched nothing (shown to the owner so the form can be fixed). */
+    unmatched: jsonb("unmatched").$type<string[]>().notNull().default([]),
+    raw: jsonb("raw").notNull(),
+    status: text("status", { enum: ["active", "cancelled"] }).notNull().default("active"),
+    createdAt: ts("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("form_responses_menu").on(t.menuId)],
 );
 
 export const messages = pgTable(
@@ -145,7 +191,8 @@ export const conversationState = pgTable("conversation_state", {
 
 /** Status + retry bookkeeping shared by the inbox and outbox queues. */
 const queueColumns = () => ({
-  status: text("status", { enum: ["pending", "processing", "done", "failed"] }).notNull().default("pending"),
+  /** suppressed (outbox only): blocked by BOT_MODE / BOT OFF; kept for REVIEW, never sent. */
+  status: text("status", { enum: ["pending", "processing", "done", "failed", "suppressed"] }).notNull().default("pending"),
   attempts: integer("attempts").notNull().default(0),
   nextAttemptAt: ts("next_attempt_at").notNull().defaultNow(),
   /** Lease while processing; an expired lease means the worker died and the row is claimable again. */
@@ -154,7 +201,27 @@ const queueColumns = () => ({
   createdAt: ts("created_at").notNull().defaultNow(),
 });
 
-/** Every inbound WhatsApp message, saved before the webhook returns 200. */
+/**
+ * Every webhook body exactly as received, saved before the 200. The worker
+ * normalizes it into inbox rows, statuses, echoes, history and contacts.
+ * Unknown shapes stay here (shape "unknown") for a person to look at.
+ */
+export const rawWebhooks = pgTable(
+  "raw_webhooks",
+  {
+    id: serial("id").primaryKey(),
+    /** `event:<id>` for 360dialog events, else `sha256:<body hash>` (Meta redelivers identical bodies). */
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    provider: text("provider").notNull(),
+    shape: text("shape", { enum: ["meta_entry", "d360_event", "unknown"] }).notNull(),
+    body: jsonb("body_json").notNull(),
+    receivedAt: ts("received_at").notNull().defaultNow(),
+    ...queueColumns(),
+  },
+  (t) => [index("raw_webhooks_status_next").on(t.status, t.nextAttemptAt), index("raw_webhooks_received").on(t.receivedAt)],
+);
+
+/** Every inbound WhatsApp message, normalized from raw_webhooks by the worker. */
 export const inbox = pgTable(
   "inbox",
   {
@@ -220,7 +287,10 @@ export const kv = pgTable("kv", {
 
 export type Customer = typeof customers.$inferSelect;
 export type Menu = typeof menus.$inferSelect;
+export type Product = typeof products.$inferSelect;
+export type FormResponse = typeof formResponses.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
 export type InboxRow = typeof inbox.$inferSelect;
+export type RawWebhookRow = typeof rawWebhooks.$inferSelect;
 export type OutboxRow = typeof outbox.$inferSelect;

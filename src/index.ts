@@ -7,7 +7,8 @@ import { loadDotEnv } from "./lib/env";
 import { llmFromEnv } from "./llm";
 import { flushSentry, initSentry } from "./lib/sentry";
 import { GoogleSheetSink } from "./sheets/client";
-import { DryRunWaClient, GraphWaClient } from "./wa/client";
+import { DryRunWaClient } from "./wa/client";
+import { createProvider } from "./wa/provider";
 
 loadDotEnv();
 const cfg = loadConfig();
@@ -16,7 +17,7 @@ else log.warn("SENTRY_DSN not set: errors are only logged");
 const db = cfg.databaseUrl ? await connectPostgres(cfg.databaseUrl) : await connectPglite();
 if (!cfg.databaseUrl) log.warn("DATABASE_URL not set: using in-memory PGlite, data is lost on restart");
 
-const wa = cfg.waDryRun ? new DryRunWaClient() : new GraphWaClient(cfg.waToken, cfg.waPhoneNumberId, cfg.waGraphVersion, { url: cfg.waApiUrl, authHeader: cfg.waAuthHeader });
+const wa = cfg.waDryRun ? new DryRunWaClient() : createProvider(cfg);
 const picked = llmFromEnv();
 if (!picked) throw new Error("No parser API key: set ANTHROPIC_API_KEY, or LLM_PROVIDER + LLM_API_KEY + LLM_MODEL");
 const { llm, label } = picked;
@@ -24,7 +25,7 @@ const sheets = cfg.googleServiceAccountJson && cfg.sheetId ? new GoogleSheetSink
 if (!sheets) log.warn("Google Sheet sync off: set GOOGLE_SERVICE_ACCOUNT_JSON and SHEET_ID to turn it on");
 const { app, worker } = createApp({ db, wa, llm, cfg, sheets, now: () => new Date() });
 
-const server = serve({ fetch: app.fetch, port: cfg.port }, (info) => log.info("listening", { port: info.port, dryRun: cfg.waDryRun, parser: label }));
+const server = serve({ fetch: app.fetch, port: cfg.port }, (info) => log.info("listening", { port: info.port, provider: cfg.waProvider, mode: cfg.botMode, dryRun: cfg.waDryRun, parser: label }));
 worker.start();
 
 // Cloud Run sends SIGTERM before stopping an instance. Unfinished rows stay in

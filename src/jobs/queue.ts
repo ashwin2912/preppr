@@ -1,14 +1,14 @@
 import { sql } from "drizzle-orm";
 import type { DB } from "../db/client";
-import { inbox, outbox, type InboxRow, type OutboxRow } from "../db/schema";
+import { inbox, outbox, rawWebhooks, type InboxRow, type OutboxRow, type RawWebhookRow } from "../db/schema";
 
 export const LEASE_MS = 2 * 60 * 1000;
 
-type Queue = typeof inbox | typeof outbox;
+type Queue = typeof inbox | typeof outbox | typeof rawWebhooks;
 
 // One advisory lock per queue serializes claiming across instances. Claims are a
 // single short UPDATE, so this costs nothing and keeps the per-key rule exact.
-const CLAIM_LOCK = { inbox: 7_401_001, outbox: 7_401_002 } as const;
+const CLAIM_LOCK = { inbox: 7_401_001, outbox: 7_401_002, raw_webhooks: 7_401_003 } as const;
 
 /**
  * Claim up to `limit` due rows, at most one per key (phone for the inbox,
@@ -48,3 +48,7 @@ export const claimInbox = (db: DB, now: Date, limit: number) =>
 
 export const claimOutbox = (db: DB, now: Date, limit: number) =>
   claim(db, outbox, "outbox", "to", now, limit) as Promise<OutboxRow[]>;
+
+/** Raw webhook bodies, oldest first (keyed by id: every row is its own key). The worker handles them in order. */
+export const claimRawWebhooks = (db: DB, now: Date, limit: number) =>
+  claim(db, rawWebhooks, "raw_webhooks", "id", now, limit) as Promise<RawWebhookRow[]>;
