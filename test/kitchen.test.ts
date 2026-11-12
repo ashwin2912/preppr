@@ -294,6 +294,7 @@ describe("one permanent order form", () => {
     expect(res.headers.get("content-type")).toContain("javascript");
     const js = await res.text();
     expect(js).toContain("/public/menu.json");
+    expect(js).toContain("pp-send-note"); // tells customers to tap Send in WhatsApp
     expect(() => new Function(js)).not.toThrow(); // parses
     expect(js).toBe(FORM_SCRIPT);
   });

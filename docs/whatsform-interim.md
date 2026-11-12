@@ -15,10 +15,10 @@ Checked in the kitchen's WhatsForm account (Standard plan) on 2026-11-11.
 ## The customer's side
 
 1. They tap the link. The form shows "Menu for Wed, Nov 11 · Order by 10:30 AM", each dish and size with its price and **− / +** buttons, and a running total.
-2. They fill in name, phone and address and tap **Submit on WhatsApp**.
-3. WhatsApp opens with the order typed out ("2 × Dal 8oz, 4 × Roti (total $16)") to the kitchen's number. They tap Send.
+2. They fill in name, phone and address and tap **Submit on WhatsApp**. A note under the total and another just above the button say what happens next: the order is saved on Submit, then WhatsApp opens and they tap Send.
+3. WhatsApp opens with the order typed out ("2 × Dal 8oz, 4 × Roti (total $16)") to the kitchen's number. They tap Send. No web page can press Send for them; WhatsApp always leaves that to the person.
 
-The order is saved at step 2 (webhook, and WhatsForm Responses) even if they never tap Send. An empty order, or one sent after closing time, is blocked on the form.
+The order is saved at step 2 (webhook, and WhatsForm Responses) even if they never tap Send. Send only puts it in her chat. An empty order, or one sent after closing time, is blocked on the form.
 
 ## How it works
 
@@ -55,6 +55,7 @@ Then:
 - **The form says closed but she wants to take orders:** the menu's cutoff has passed. Publish a menu with a later cutoff (*cutoff 2pm*).
 - **No orders on the kitchen page:** check the webhook is connected. WhatsForm Responses (or Export as CSV) has every order.
 - **An order "needs a look":** the customer typed something the rules couldn't read. The text is shown on the order.
+- **A customer says they ordered but it isn't in her chat:** they didn't tap Send in WhatsApp. The order is still on `/orders` and the kitchen page.
 - **A customer wants to change their order:** they message the kitchen as usual.
 
 ## Later

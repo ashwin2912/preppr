@@ -46,7 +46,8 @@ export const FORM_SCRIPT = String.raw`(function () {
       ".pp .pp-step button.pp-plus{background:#25a244;color:#fff}" +
       ".pp .pp-n{min-width:20px;text-align:center;font-weight:600}" +
       ".pp .pp-total{display:flex;justify-content:space-between;border-top:1px solid #e3e3e3;margin-top:6px;padding-top:10px;font-weight:700}" +
-      ".pp .pp-err{color:#c0392b;font-size:14px;margin-top:6px}.pp .pp-closed{font-size:15px;color:#444}";
+      ".pp .pp-err{color:#c0392b;font-size:14px;margin-top:6px}.pp .pp-closed{font-size:15px;color:#444}" +
+      ".pp-note{color:#555;font-size:14px;margin:8px 0;line-height:1.35}";
     document.head.appendChild(s);
   }
 
@@ -126,6 +127,7 @@ export const FORM_SCRIPT = String.raw`(function () {
     total.appendChild(el("span", null, "Total"));
     total.appendChild(el("span", null, money(t.total)));
     box.appendChild(total);
+    box.appendChild(el("p", "pp-note", "Tap Submit to place your order. WhatsApp opens next with it typed out: tap Send so we see it."));
     var err = el("div", "pp-err");
     err.id = "pp-err";
     box.appendChild(err);
@@ -152,7 +154,20 @@ export const FORM_SCRIPT = String.raw`(function () {
     box.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
+  // WhatsForm ends by opening WhatsApp; say so next to the button.
+  function sendNote() {
+    var old = document.getElementById("pp-send-note");
+    if (!menu || !menu.open) { if (old) old.remove(); return; }
+    var btn = document.querySelector("form button[type=submit]");
+    if (!btn || (old && old.nextElementSibling === btn)) return;
+    if (old) old.remove();
+    var note = el("div", "pp-note", "Your order is saved when you tap Submit. Then tap Send in WhatsApp.");
+    note.id = "pp-send-note";
+    btn.parentNode.insertBefore(note, btn);
+  }
+
   function mount() {
+    sendNote();
     if (box && document.contains(box)) return;
     q = findQuestion();
     if (!q) return;
@@ -166,6 +181,7 @@ export const FORM_SCRIPT = String.raw`(function () {
     q.input.style.display = "none";
     q.label.parentNode.insertBefore(box, q.label);
     render();
+    sendNote();
   }
 
   function start(data) {

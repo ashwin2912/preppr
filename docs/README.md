@@ -124,6 +124,7 @@ To look at the data: `psql "$(neon connection-string main --project-id muddy-for
 
 | Doc | For |
 |---|---|
+| [`current-system.md`](current-system.md) | One-page snapshot of everything deployed now |
 | [`whatsform-interim.md`](whatsform-interim.md) | WhatsForm: plan, template form, daily steps, troubleshooting |
 | [`owner-assistant.md`](owner-assistant.md) | The owner assistant + kitchen page: commands, setup, operations |
 | [`meta-setup.md`](meta-setup.md) | Meta app, test number, webhook, tokens |
