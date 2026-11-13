@@ -226,6 +226,24 @@ export function menuItemsFromPicks(picks: MenuPick[]): MenuItem[] {
   return items;
 }
 
+/**
+ * Carry ids over from the menu being replaced: the same product+size (or, for
+ * free-text menus, the same name) keeps its id, so stored order lines still
+ * match. New items get ids no earlier item used.
+ */
+export function keepItemIds(prev: MenuItem[], next: MenuItem[]): MenuItem[] {
+  const keyOf = (i: MenuItem) => (i.product_id !== undefined ? `p${i.product_id}:${i.size ?? ""}` : `n:${nameKey(i.name)}`);
+  const ids = new Map(prev.map((i) => [keyOf(i), i.id]));
+  let n = Math.max(0, ...prev.map((i) => Number(i.id.match(/^i(\d+)$/)?.[1] ?? 0)));
+  const used = new Set<string>();
+  return next.map((i) => {
+    const old = ids.get(keyOf(i));
+    const id = old && !used.has(old) ? old : `i${++n}`;
+    used.add(id);
+    return { ...i, id };
+  });
+}
+
 /** Dish + size labels on a menu, back as picks against today's product list; lines of removed dishes or sizes come back in `missing`. */
 export function picksFromMenu(items: MenuItem[], list: Product[]): { picks: MenuPick[]; missing: string[] } {
   const picks: MenuPick[] = [];

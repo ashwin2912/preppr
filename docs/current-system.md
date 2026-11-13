@@ -11,10 +11,11 @@ This is a snapshot of what runs for the first kitchen today: **customers order t
 | Owner-only mode | `OWNER_ONLY=1`: any other number is stored, never answered | `src/flows/router.ts` |
 | Kitchen page | `/admin/kitchen` (link from `/app`, 30-day token + cookie). Today: menu, form setup card, orders, sales, what to make, broadcast. Products: dishes and sizes | `src/admin/kitchen.ts` |
 | Order form | One permanent WhatsForm. Its Custom Script loads `/wf.js`, which reads `/public/menu.json` and draws the menu with +/− into the "Your order" question. Notes tell the customer the order is saved on Submit, then to tap Send in WhatsApp | `src/flows/formScript.ts`, `formMenu.ts` |
+| Order page (built, not switched on) | `/order`: one shared link. First order asks phone, name, address and remembers the browser (cookie); later visits are prefilled. Orders go into `orders` (priced in code), owner pinged per order. Details: [`order-page.md`](order-page.md) | `src/flows/orderPage.ts`, `src/flows/dayOrders.ts` |
 | Order intake | WhatsForm webhook `POST /webhooks/whatsform/<token>` → `form_responses`. "Your order" parsed (script format, then strict rules), priced in code from the menu, customer upserted (empty fields only), unreadable lines flagged | `src/flows/formOrders.ts`, `src/domain/formOrders.ts` |
 | Model | Groq `openai/gpt-oss-120b`, only for loose dish/menu text from the owner. Prices it returns must appear in her text; nothing saved until she taps Save/Publish | `src/llm/*` |
 
-`ORDER_CHANNEL=whatsform`: Publish replies with the broadcast text (form link included); no cutoff summary is sent.
+`ORDER_CHANNEL=whatsform`: Publish replies with the broadcast text (form link included); no cutoff summary is sent. `ORDER_CHANNEL=page` is the same on the owner side, with the `/order` link in the broadcast.
 
 ## Flow of a day
 
@@ -30,8 +31,9 @@ This is a snapshot of what runs for the first kitchen today: **customers order t
 |---|---|
 | `/webhook`, `/webhooks/whatsapp` | Meta webhook (HMAC verified, raw body stored, then worker) |
 | `/webhooks/whatsform/:token` | WhatsForm submissions |
+| `/order`, `/order/start`, `/order/forget` | Customer order page (device cookie, same-origin POSTs, rate limited) |
 | `/public/menu.json`, `/wf.js` | Public menu (no customer data, CORS `*`) and form script |
-| `/admin/kitchen`, `/admin`, `/admin/c/:phone` | Kitchen page; read-only chat viewer |
+| `/admin/kitchen`, `/admin`, `/admin/c/:phone` | Kitchen page (Today, Products, Customers); read-only chat viewer |
 | `/healthz`, `/readyz`, `/health` | Liveness, DB readiness, watchdog report |
 | `/jobs/cutoff`, `/internal/cutoff` | Bearer-protected cutoff job (unused in WhatsForm mode) |
 
@@ -47,11 +49,11 @@ This is a snapshot of what runs for the first kitchen today: **customers order t
 
 ## Data
 
-Neon Postgres (`src/db/schema.ts`): `products`, `menus`, `form_responses`, `customers`, `kv` (`form_link`, drafts), and message tables (`messages`, `raw_webhooks`, `inbox`, `outbox`, `wa_statuses`). `orders` and `payments` are empty in this mode. Outside: WhatsForm Responses / Google Sheet (backup source of truth), and the customer's message in the owner's WhatsApp Business app.
+Neon Postgres (`src/db/schema.ts`): `products`, `menus`, `form_responses`, `customers`, `kv` (`form_link`, drafts), and message tables (`messages`, `raw_webhooks`, `inbox`, `outbox`, `wa_statuses`). `orders` holds order-page orders (`source = 'page'`) once customers use `/order`; `customer_devices` the remembered browsers (token hashes). `payments` is empty in this mode. The kitchen page and `/how /what /orders` read `orders` and `form_responses` together. Outside: WhatsForm Responses / Google Sheet (backup source of truth), and the customer's message in the owner's WhatsApp Business app.
 
 ## Known limits
 
-- Customers retype name, phone and address every time: one shared link, so the form can't know who opened it.
+- Customers retype name, phone and address every time on WhatsForm: one shared link, so the form can't know who opened it. (Fixed by the order page.)
 - WhatsForm webhook payload shape not yet confirmed with a real submission.
 - Customers must tap Send for the order to appear in the owner's chat (the order is saved either way).
 - Test number only; token is a user token, not a system-user token.
@@ -59,4 +61,4 @@ Neon Postgres (`src/db/schema.ts`): `products`, `menus`, `form_responses`, `cust
 
 ## Next
 
-Replace WhatsForm with our own order page (personal links per customer, prefilled details, orders straight into our DB). Backlog for the current system: [`README.md`](README.md#backlog-in-order).
+Switch to the order page (`ORDER_CHANNEL=page`, [`order-page.md`](order-page.md) "Switch-over") after a test order on a real phone. Backlog for the current system: [`README.md`](README.md#backlog-in-order).

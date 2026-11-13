@@ -44,9 +44,10 @@ Before committing: `pnpm typecheck && pnpm test && pnpm build`. The default `.en
 - `src/flows/onboarding.ts`: only for unknown numbers (`needsOnboarding = !customer`).
 - `src/jobs/cutoff.ts`, `watchdog.ts` (also no_inbound, send_failures, app_idle → `notifyOps` = Sentry + WhatsApp to `OPERATOR_NUMBERS`; `healthReport` for `/health`), `sheetSync.ts`; `src/ops/checks.ts` (`wa:check`); `src/sheets/client.ts` (Sheets REST + service-account JWT, no SDK).
 - `src/backup/*` + `scripts/backup-orders.ts`: Mac tool `preppr-orders` (docs/backup-orders.md). Reads WhatsApp Business chats from the owner's iPhone backup (decrypts with node:crypto, bplist parser, `sqlite.ts` = bun:sqlite or node:sqlite), feeds `src/domain/exportOrders.ts` (`OrderInput` → `extractFromInputs`, shared with chat exports), writes CSVs. Keep it free of db/flows imports so the Bun binary stays small. Installer: `deploy/mac/install.sh`.
-- `src/admin/*`: read-only chat viewer behind an HMAC link from the CHATS command; `src/admin/kitchen.ts` = owner's kitchen page at `/admin/kitchen` (dishes CRUD, publish a menu from ticked sizes, broadcast + permanent form link, Custom Script + webhook setup), link from the APP command (30-day token, same cookie). Tabs: Today (menu first, then orders/sales/what-to-make from `form_responses`, broadcast) and Products. Forms POST; Lax cookie + Sec-Fetch-Site/Origin check.
+- `src/admin/*`: read-only chat viewer behind an HMAC link from the CHATS command; `src/admin/kitchen.ts` = owner's kitchen page at `/admin/kitchen` (dishes CRUD, publish a menu from ticked sizes, broadcast + permanent form link, Custom Script + webhook setup), link from the APP command (30-day token, same cookie). Tabs: Today (menu first, then orders/sales/what-to-make from `dayOrders`, broadcast), Products, and Customers (devices, .vcf/.csv import). Forms POST; Lax cookie + Sec-Fetch-Site/Origin check.
 - `src/flows/formMenu.ts` + `formScript.ts`: one permanent WhatsForm. Its Custom Script loads `/wf.js`, which reads `GET /public/menu.json` (`orderableMenu`: earliest active menu ≥ today before cutoff; no customer data, CORS *) and fills the form's "Your order" text question. Form link saved once (kv `form_link`, `/link`).
 - `src/flows/formOrders.ts` + `src/domain/formOrders.ts`: WhatsForm webhook `/webhooks/whatsform/<token>` → `form_responses` ("Your order" read by `parseOrderText`: script format, then strict `ruleInterpret`; legacy per-dish keys still matched; priced in code, customer upserted, unmatched flagged); `prepTotals` adds up unit sizes (oz/ml/g). Payload shape not yet seen for real.
+- `src/flows/orderPage.ts` + `src/domain/orderPage.ts`: customer order page `/order` (docs/order-page.md). One shared link; first order sets a random device cookie (`customer_devices`, sha256 only), later visits prefilled; a known number on a new browser sees masked details, its order is flagged and can't replace an existing one. Orders go into `orders` (`source = 'page'`), priced with `priceLines`; owner pinged per change via `send()`. `src/flows/dayOrders.ts`: owner views (kitchen page, `/how /what /orders`) over `orders` + `form_responses`. `ORDER_CHANNEL=page` puts the `/order` link in broadcasts. Shared POST checks in `src/admin/http.ts`, in-memory limits in `src/lib/rateLimit.ts`. Kitchen-page menu saves after orders keep item ids (`keepItemIds`) and refuse dropping/repricing ordered dishes.
 - `src/db/schema.ts`: Drizzle schema; migrations in `drizzle/` run at startup.
 
 ## Rules that matter
@@ -71,10 +72,14 @@ Before committing: `pnpm typecheck && pnpm test && pnpm build`. The default `.en
 - `docs/pilot-cloudflare.md`: pilot on one machine (laptop now, VPS later): `deploy/pilot/` has the Compose file (app + cloudflared) and the cutoff cron Worker.
 - `docs/deployment-plan.md`: how to deploy one kitchen, and how to productize for many.
 - `docs/production-readiness.md`: launch checklist and status.
-- `docs/owner-assistant.md`: owner-only menu assistant for the WhatsForm flow (commands, setup on a test number, smoke test). `docs/whatsform-interim.md`: the WhatsForm stopgap itself.
+- `docs/owner-assistant.md`: owner-only menu assistant for the WhatsForm flow (commands, setup on a test number, smoke test). `docs/whatsform-interim.md`: the WhatsForm stopgap itself. `docs/order-page.md`: our own `/order` page that replaces it.
 - `docs/coexistence-setup.md`: bot on the owner's existing number (current plan for the first kitchen): behavior, menu template, onboarding, smoke test.
 - `docs/meta-setup.md`, `docs/google-sheet-setup.md`, `docs/monitoring.md` (alerts + runbook), `docs/owner-setup.md` (for the kitchen owner).
 - `system-design.md`: original architecture and laptop setup (partly superseded by the inbox/outbox design in README "Design notes").
+
+## Status (2026-11-12)
+
+- **Order page built (branch `order-page`)**, tested with the harness; not yet deployed or tried on a real phone. Switch-over steps: docs/order-page.md.
 
 ## Status (2026-11-07)
 

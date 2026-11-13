@@ -1,6 +1,6 @@
 # WhatsForm: one order form that shows today's menu
 
-A stopgap until customers order in chat. There is **one permanent WhatsForm form with one link**. It shows whatever menu the owner published on WhatsApp, so she never edits WhatsForm day to day. Orders reach the kitchen page and `/how` `/what` `/orders` through the webhook.
+A stopgap until customers order in chat. **Being replaced by our own order page** ([`order-page.md`](order-page.md)); both run side by side until `ORDER_CHANNEL=page`. There is **one permanent WhatsForm form with one link**. It shows whatever menu the owner published on WhatsApp, so she never edits WhatsForm day to day. Orders reach the kitchen page and `/how` `/what` `/orders` through the webhook.
 
 Owner's assistant and kitchen page: [`owner-assistant.md`](owner-assistant.md). Overview: [`README.md`](README.md).
 

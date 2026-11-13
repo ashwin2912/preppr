@@ -41,7 +41,7 @@ export async function runCutoff(deps: Deps) {
         .returning();
       if (!claimed) return;
       // Orders come in through WhatsForm, so there is nothing to sum up here.
-      if (deps.cfg.orderChannel === "whatsform") return;
+      if (deps.cfg.orderChannel !== "bot") return;
       const ctx = { ...deps, db: tx, out: { prefix: `cutoff:${m.id}:${now.getTime()}`, n: 0 } };
       let sent = false;
       for (const owner of deps.cfg.ownerNumbers) {

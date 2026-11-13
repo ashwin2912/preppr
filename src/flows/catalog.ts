@@ -233,11 +233,17 @@ export async function getFormLink(db: Ctx["db"]): Promise<string | null> {
   return (await kvGet<string>(db, FORM_LINK_KEY)) || null;
 }
 
+/** The link that goes in the broadcast: our order page (ORDER_CHANNEL=page), else the saved WhatsForm link. */
+export async function orderLink(ctx: Pick<Ctx, "db" | "cfg">): Promise<string | null> {
+  if (ctx.cfg.orderChannel === "page") return ctx.cfg.publicUrl ? `${ctx.cfg.publicUrl}/order` : null;
+  return getFormLink(ctx.db);
+}
+
 export const setFormLink = (db: Ctx["db"], url: string, now: Date) => kvSet(db, FORM_LINK_KEY, url, now);
 
 /** After Publish (WhatsForm flow): the order form already shows the new menu, so only the broadcast is left. */
 export async function sendFormKit(ctx: Ctx, phone: string, m: Menu) {
-  const link = await getFormLink(ctx.db);
+  const link = await orderLink(ctx);
   await sendText(
     ctx,
     phone,
@@ -402,7 +408,7 @@ export async function chatSetCutoff(ctx: Ctx, phone: string, day: string | null,
   if (cutoffAt <= ctx.now()) return sendText(ctx, phone, `${formatClock(cutoffAt, ctx.cfg.tz)} has already passed.`);
   if (m.status === "draft") return saveDraftMenu(ctx, phone, { date: m.date, cutoffAt, items: m.items, cutoffWasDefault: false });
   await ctx.db.update(menus).set({ cutoffAt, status: "active", summarySentAt: null }).where(eq(menus.id, m.id));
-  const tail = ctx.cfg.orderChannel === "whatsform" ? " Send /message for the updated broadcast." : "";
+  const tail = ctx.cfg.orderChannel !== "bot" ? " Send /message for the updated broadcast." : "";
   await sendText(ctx, phone, `Cutoff for ${formatDay(m.date, ctx.cfg.tz)} is now ${formatClock(cutoffAt, ctx.cfg.tz)} ✅${tail}`);
 }
 

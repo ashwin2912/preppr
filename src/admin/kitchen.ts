@@ -1,19 +1,23 @@
 import type { Context, Hono } from "hono";
-import { and, eq } from "drizzle-orm";
+import { and, count, desc, eq, isNull, max } from "drizzle-orm";
 import { formatInTimeZone } from "date-fns-tz";
 import type { Deps } from "../flows/router";
-import { formResponses, menus, products, type FormResponse, type Menu, type Product, type ProductSize } from "../db/schema";
+import { customerDevices, customers, menus, orders, products, type Customer, type Menu, type Product, type ProductSize } from "../db/schema";
+import { importCustomers, parseContactsVcf, parseCustomersCsv, type ImportReport } from "../domain/importCustomers";
 import { prepTotals } from "../domain/formOrders";
 import { formatFormBroadcast } from "../domain/menu";
 import { money } from "../domain/order";
 import { formatSizes, isUnitLabel, menuItemsFromPicks, nameKey, shortMoney, type MenuPick } from "../domain/products";
-import { activeProducts, getFormLink, setFormLink } from "../flows/catalog";
-import { formWebhookPath, responsesFor } from "../flows/formOrders";
-import { upsertMenu } from "../flows/menuDraft";
+import { activeProducts, orderLink, setFormLink } from "../flows/catalog";
+import { cancelDayOrder, dayOrders, trustDayOrder, type DayOrder } from "../flows/dayOrders";
+import { formWebhookPath } from "../flows/formOrders";
+import { blockedText, upsertMenu } from "../flows/menuDraft";
 import { formatDay, localDate, zonedInstant } from "../lib/time";
 import { esc, page } from "./html";
+import { readForm, sameOrigin } from "./http";
 
 const SIZE_ROWS = 6;
+const IMPORT_MAX_BYTES = 1_000_000;
 const BASE = "/admin/kitchen";
 
 const KITCHEN_CSS = `
@@ -75,8 +79,8 @@ export function productFromForm(f: Record<string, string>): { name: string; size
   return { name, sizes };
 }
 
-const tabs = (on: "today" | "products") =>
-  `<nav class="tabs"><a class="${on === "today" ? "on" : ""}" href="${BASE}">Today</a><a class="${on === "products" ? "on" : ""}" href="${BASE}/products">Products</a></nav>`;
+const tabs = (on: "today" | "products" | "customers") =>
+  `<nav class="tabs"><a class="${on === "today" ? "on" : ""}" href="${BASE}">Today</a><a class="${on === "products" ? "on" : ""}" href="${BASE}/products">Products</a><a class="${on === "customers" ? "on" : ""}" href="${BASE}/customers">Customers</a></nav>`;
 
 function productForm(p: { id?: number; name: string; sizes: ProductSize[] }, error?: string) {
   const rows = Array.from({ length: SIZE_ROWS }, (_, i) => {
@@ -137,10 +141,10 @@ function menuSummary(m: Menu, tz: string) {
 <div>${names.map((n) => `<span class="chip">${esc(n)}</span>`).join("")}</div></div>`;
 }
 
-function prepCard(m: Menu, responses: FormResponse[]) {
+function prepCard(m: Menu, list: DayOrder[]) {
   const rows = prepTotals(
     m.items,
-    responses.flatMap((r) => r.lines),
+    list.flatMap((r) => r.lines),
   );
   const items = rows
     .map((r) => `<li><span>${esc(r.name)}${r.detail ? `<br><span class="muted">${esc(r.detail)}</span>` : ""}</span><b>${esc(r.amount)}</b></li>`)
@@ -148,30 +152,66 @@ function prepCard(m: Menu, responses: FormResponse[]) {
   return `<div class="card prep"><h2>What to make</h2>${items ? `<ul class="list">${items}</ul>` : `<p class="muted">No orders yet. Totals show up here as orders come in.</p>`}</div>`;
 }
 
-/** The order form shows the published menu by itself: only the broadcast is left to do (and the link, once). */
+/** The order form/page shows the published menu by itself: only the broadcast is left to do (and, for WhatsForm, the link once). */
 function formSteps(m: Menu, link: string | null, deps: Deps) {
+  const page = deps.cfg.orderChannel === "page";
+  const linkRow = page
+    ? `<label>Your order page</label><p><code id="ol">${esc(link ?? "set PUBLIC_URL")}</code></p><div class="copyrow"><button type="button" class="ghost" data-copy="ol">Copy link</button></div>`
+    : `<label>Order form link${link ? "" : " (paste it once)"}</label>
+<form method="post" action="${BASE}/link" class="row2"><input type="url" name="url" value="${esc(link ?? "")}" placeholder="https://whatsform.com/…"><button type="submit" style="flex:0">Save</button></form>`;
   return `<details class="card" open><summary>${link ? "Send today's broadcast" : "Set up your order form link (one time)"}</summary>
-${link ? `<p class="muted">Your order form shows this menu now.</p>` : ""}
-<label>Order form link${link ? "" : " (paste it once)"}</label>
-<form method="post" action="${BASE}/link" class="row2"><input type="url" name="url" value="${esc(link ?? "")}" placeholder="https://whatsform.com/…"><button type="submit" style="flex:0">Save</button></form>
+${link ? `<p class="muted">Your order ${page ? "page" : "form"} shows this menu now.</p>` : ""}
+${linkRow}
 <label>Send this to your broadcast list</label>
 <textarea id="bc" readonly rows="9">${esc(formatFormBroadcast(m, deps.cfg, link, false))}</textarea>
 <div class="copyrow"><button type="button" class="ghost" data-copy="bc">Copy message</button></div></details>`;
 }
 
-function ordersCard(responses: FormResponse[], tz: string) {
-  const items = responses
+const SOURCE_LABEL: Record<DayOrder["source"], string> = { page: "order page", form: "WhatsForm", bot: "chat" };
+
+function ordersCard(list: DayOrder[], tz: string) {
+  const items = list
     .map((r) => {
-      const who = r.name ?? r.customerPhone ?? "Someone";
-      const what = r.lines.map((l) => `${l.qty}× ${l.name}`).join(", ") || "no dishes matched";
+      const who = r.name ?? r.phone ?? "Someone";
+      const what = r.lines.map((l) => `${l.qty}× ${l.name}`).join(", ") || "no dishes";
       const where = [r.area, r.address].filter(Boolean).join(" · ");
-      return `<li class="order"><span><span class="who">${esc(who)}</span> <span class="muted">${esc(formatInTimeZone(r.createdAt, tz, "h:mm a"))}</span><br>
+      const trust = r.canTrust
+        ? `<form method="post" action="${BASE}/o/${esc(r.key)}/trust"><button class="link" type="submit">it's them ✓</button></form>`
+        : "";
+      return `<li class="order"><span><span class="who">${esc(who)}</span> <span class="muted">${esc(formatInTimeZone(r.createdAt, tz, "h:mm a"))} · ${SOURCE_LABEL[r.source]}</span><br>
 <span class="what">${esc(what)}</span>${where ? `<br><span class="muted">${esc(where)}</span>` : ""}${r.note ? `<br><span class="muted">📝 ${esc(r.note)}</span>` : ""}
-${r.unmatched.length ? `<br><span class="chip warn">check: ${esc(r.unmatched.join("; "))}</span>` : ""}</span>
-<span><b>${esc(money(r.totalCents))}</b><form method="post" action="${BASE}/o/${r.id}/cancel" onsubmit="return confirm('Remove this order?')"><button class="link" type="submit">remove</button></form></span></li>`;
+${r.check.length ? `<br><span class="chip warn">check: ${esc(r.check.join("; "))}</span>` : ""}</span>
+<span><b>${esc(money(r.totalCents))}</b>${trust}<form method="post" action="${BASE}/o/${esc(r.key)}/cancel" onsubmit="return confirm('Remove this order?')"><button class="link" type="submit">remove</button></form></span></li>`;
     })
     .join("");
-  return `<div class="card"><h2>Orders (${responses.length})</h2>${items ? `<ul class="list">${items}</ul>` : `<p class="muted">Orders from your WhatsForm show up here.</p>`}</div>`;
+  return `<div class="card"><h2>Orders (${list.length})</h2>${items ? `<ul class="list">${items}</ul>` : `<p class="muted">Orders show up here as customers send them.</p>`}</div>`;
+}
+
+type CustomerRow = { customer: Customer; lastOrder: string | null; devices: number };
+
+function customersView(rows: CustomerRow[], report?: string) {
+  const items = rows
+    .map(({ customer: c, lastOrder, devices }) => {
+      const where = [c.area, c.addressNote].filter(Boolean).join(" · ");
+      const forget = devices
+        ? `<form method="post" action="${BASE}/customers/${encodeURIComponent(c.phone)}/forget" onsubmit="return confirm('Their phone will ask for their number again. Continue?')"><button class="link" type="submit">forget ${devices} device${devices === 1 ? "" : "s"}</button></form>`
+        : "";
+      return `<li><span><b>${esc(c.name ?? "—")}</b> <span class="muted">${esc(c.phone)}</span>${where ? `<br><span class="muted">${esc(where)}</span>` : ""}${lastOrder ? `<br><span class="muted">last order ${esc(lastOrder)}</span>` : ""}</span><span>${forget}</span></li>`;
+    })
+    .join("");
+  return `${tabs("customers")}${report ?? ""}<div class="card"><h2>Customers (${rows.length})</h2>
+<p class="muted">Customers are saved the first time they order on the order page. Their phone remembers them after that.</p>
+${items ? `<ul class="list">${items}</ul>` : `<p class="muted">No customers yet.</p>`}</div>
+<form class="card" method="post" action="${BASE}/customers/import" enctype="multipart/form-data"><h2>Import customers</h2>
+<p class="muted">A contacts file (.vcf) from your phone, or a .csv with columns phone,name,area,address_note. Existing details are never blanked. A .vcf brings in every contact on it, so export only your customers if you can.</p>
+<input type="file" name="file" accept=".vcf,.csv,text/vcard,text/csv" required>
+<p><button type="submit">Import</button></p></form>`;
+}
+
+function importReport(file: string, r: ImportReport) {
+  const bad = r.badPhones.length ? `<br>Skipped ${r.badPhones.length} invalid number${r.badPhones.length === 1 ? "" : "s"}: ${esc(r.badPhones.slice(0, 5).map((b) => b.phone).join(", "))}` : "";
+  const areas = r.areaMismatches.length ? `<br>${r.areaMismatches.length} area${r.areaMismatches.length === 1 ? "" : "s"} didn't match your list (left empty).` : "";
+  return `<div class="flash">${esc(file)}: ${r.inserted} added, ${r.updated} updated.${bad}${areas}</div>`;
 }
 
 function connectCard(deps: Deps) {
@@ -196,38 +236,13 @@ export function registerKitchen(app: Hono, deps: Deps, viewer: Viewer, noStore: 
   const kpage = (title: string, body: string) => page(title, `<h1>${esc(deps.cfg.kitchenName)}</h1>`, `<style>${KITCHEN_CSS}</style>${body}${COPY_JS}`);
   const denied = (c: Context) =>
     c.html(page("Link expired", "<h1>Kitchen</h1>", `<p class="empty">This link has expired or isn't valid.<br>Send <b>/app</b> to the assistant on WhatsApp for a new one.</p>`), 401);
-  /**
-   * Cookie is SameSite=Lax; also refuse form posts from another site. Browsers send
-   * `Origin: null` when the page's referrer policy hides it, so fall back to Sec-Fetch-Site.
-   */
-  const sameOrigin = (c: Context) => {
-    const site = c.req.header("sec-fetch-site");
-    if (site) return site === "same-origin";
-    const origin = c.req.header("origin");
-    if (!origin || origin === "null") return true; // old browsers; the Lax cookie already blocks cross-site posts
-    try {
-      return new URL(origin).host === (c.req.header("host") ?? new URL(c.req.url).host);
-    } catch {
-      return false;
-    }
-  };
   const guard = (c: Context, post = false) => {
     noStore(c);
     // Pages here carry no token in the URL, so same-origin referrers are fine (and keep Origin real).
     c.header("Referrer-Policy", "same-origin");
     return viewer(c) && (!post || sameOrigin(c));
   };
-  const form = async (c: Context) => {
-    const body = await c.req.parseBody({ all: true });
-    const one: Record<string, string> = {};
-    const all: Record<string, string[]> = {};
-    for (const [k, v] of Object.entries(body)) {
-      const vals = (Array.isArray(v) ? v : [v]).filter((x): x is string => typeof x === "string");
-      all[k] = vals;
-      one[k] = vals[0] ?? "";
-    }
-    return { one, all };
-  };
+  const form = readForm;
   const flashOf = (c: Context) => {
     const ok = c.req.query("ok");
     const err = c.req.query("err");
@@ -254,23 +269,23 @@ export function registerKitchen(app: Hono, deps: Deps, viewer: Viewer, noStore: 
       );
     }
 
-    const responses = await responsesFor(deps, m.id);
-    const sales = responses.reduce((s, r) => s + r.totalCents, 0);
-    const link = await getFormLink(deps.db);
-    const unmatched = responses.filter((r) => r.unmatched.length || !r.lines.length).length;
-    const warn = unmatched
-      ? `<div class="card warnbox"><b>${unmatched} order${unmatched === 1 ? "" : "s"} need a look</b><p class="muted">Some answers didn't match today's menu, usually because a form question was renamed. Check them below and in your Google Sheet.</p></div>`
+    const list = await dayOrders(deps.db, m.id);
+    const sales = list.reduce((s, r) => s + r.totalCents, 0);
+    const link = await orderLink(deps);
+    const flagged = list.filter((r) => r.check.length).length;
+    const warn = flagged
+      ? `<div class="card warnbox"><b>${flagged} order${flagged === 1 ? "" : "s"} need a look</b><p class="muted">See "check" on the orders below: a WhatsForm answer that didn't match the menu, or an order from a phone we haven't seen for that number (tap "it's them" if it's fine).</p></div>`
       : "";
     const body =
       tabs("today") +
       flashOf(c) +
       menuSummary(m, tz) +
       formSteps(m, link, deps) +
-      statsRow(responses.length, sales) +
+      statsRow(list.length, sales) +
       warn +
-      prepCard(m, responses) +
-      ordersCard(responses, tz) +
-      connectCard(deps);
+      prepCard(m, list) +
+      ordersCard(list, tz) +
+      (deps.cfg.orderChannel === "whatsform" ? connectCard(deps) : "");
     return c.html(kpage("Today", body));
   });
 
@@ -344,7 +359,7 @@ export function registerKitchen(app: Hono, deps: Deps, viewer: Viewer, noStore: 
     const date = localDate(deps.now(), tz);
     const cutoffAt = zonedInstant(date, "23:59", tz);
     const r = await upsertMenu(deps.db, { date, cutoffAt, items: menuItemsFromPicks(picks), cutoffWasDefault: false }, "active", deps.now());
-    if ("blockedBy" in r) return back(c, `Today's menu already has ${r.blockedBy} order(s), so it can't be replaced.`, true);
+    if ("blockedBy" in r) return back(c, blockedText(r), true, `${BASE}/menu`);
     return back(c, "Menu saved ✓");
   });
 
@@ -357,10 +372,68 @@ export function registerKitchen(app: Hono, deps: Deps, viewer: Viewer, noStore: 
     return back(c, url ? "Link saved: it's in the broadcast message now." : "Link cleared.");
   });
 
-  app.post(`${BASE}/o/:id/cancel`, async (c) => {
+  app.post(`${BASE}/o/:key/cancel`, async (c) => {
     if (!guard(c, true)) return denied(c);
-    await deps.db.update(formResponses).set({ status: "cancelled" }).where(eq(formResponses.id, Number(c.req.param("id"))));
-    return back(c, "Order removed.");
+    const ok = await cancelDayOrder(deps.db, c.req.param("key"), deps.now());
+    return back(c, ok ? "Order removed." : "That order doesn't exist.", !ok);
+  });
+
+  app.post(`${BASE}/o/:key/trust`, async (c) => {
+    if (!guard(c, true)) return denied(c);
+    const ok = await trustDayOrder(deps.db, c.req.param("key"), deps.now());
+    return back(c, ok ? "Marked OK ✓ Their phone shows their saved details from now on." : "That order doesn't exist.", !ok);
+  });
+
+  const customerRows = async (): Promise<CustomerRow[]> => {
+    const last = deps.db
+      .select({ phone: orders.customerPhone, date: max(menus.date).as("last_date") })
+      .from(orders)
+      .innerJoin(menus, eq(orders.menuId, menus.id))
+      .where(eq(orders.status, "confirmed"))
+      .groupBy(orders.customerPhone)
+      .as("last");
+    const devs = deps.db
+      .select({ phone: customerDevices.customerPhone, n: count().as("n") })
+      .from(customerDevices)
+      .where(isNull(customerDevices.revokedAt))
+      .groupBy(customerDevices.customerPhone)
+      .as("devs");
+    const rows = await deps.db
+      .select({ customer: customers, lastDate: last.date, devices: devs.n })
+      .from(customers)
+      .leftJoin(last, eq(last.phone, customers.phone))
+      .leftJoin(devs, eq(devs.phone, customers.phone))
+      .orderBy(desc(last.date), customers.name);
+    return rows.map((r) => ({ customer: r.customer, lastOrder: r.lastDate ? formatDay(r.lastDate, tz) : null, devices: Number(r.devices ?? 0) }));
+  };
+
+  app.get(`${BASE}/customers`, async (c) => {
+    if (!guard(c)) return denied(c);
+    return c.html(kpage("Customers", flashOf(c) + customersView(await customerRows())));
+  });
+
+  app.post(`${BASE}/customers/import`, async (c) => {
+    if (!guard(c, true)) return denied(c);
+    if (Number(c.req.header("content-length") ?? 0) > IMPORT_MAX_BYTES + 20_000) return back(c, "That file is too big (1 MB max).", true, `${BASE}/customers`);
+    const { files } = await form(c);
+    const file = files.file;
+    if (!file || !file.size) return back(c, "Choose a .vcf or .csv file.", true, `${BASE}/customers`);
+    if (file.size > IMPORT_MAX_BYTES) return back(c, "That file is too big (1 MB max).", true, `${BASE}/customers`);
+    const text = await file.text();
+    const isVcf = /\.vcf$/i.test(file.name) || /BEGIN:VCARD/i.test(text.slice(0, 2000));
+    const { rows, report } = isVcf ? parseContactsVcf(text) : parseCustomersCsv(text, deps.cfg.areas);
+    if (!rows.length) return back(c, "No phone numbers found in that file.", true, `${BASE}/customers`);
+    await importCustomers(deps.db, rows, report, deps.now());
+    return c.html(kpage("Customers", customersView(await customerRows(), importReport(file.name, report))));
+  });
+
+  app.post(`${BASE}/customers/:phone/forget`, async (c) => {
+    if (!guard(c, true)) return denied(c);
+    await deps.db
+      .update(customerDevices)
+      .set({ revokedAt: deps.now() })
+      .where(and(eq(customerDevices.customerPhone, c.req.param("phone")), isNull(customerDevices.revokedAt)));
+    return back(c, "Done: their phone will ask for their number next time.", false, `${BASE}/customers`);
   });
 }
 

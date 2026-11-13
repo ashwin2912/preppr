@@ -119,13 +119,13 @@ async function publish(ctx: Ctx, phone: string, menuId: number) {
     // Only one menu per date exists, so publishing can't collide with another active one for the same day.
     const [pub] = await ctx.db.update(menus).set({ status: "active" }).where(eq(menus.id, m.id)).returning();
     await kvDelete(ctx.db, ownerCtxKey(phone));
-    if (ctx.cfg.orderChannel === "whatsform") return sendFormKit(ctx, phone, pub!);
+    if (ctx.cfg.orderChannel !== "bot") return sendFormKit(ctx, phone, pub!);
     if (ctx.cfg.coexistence) return offerPush(ctx, phone, pub!);
     await sendText(ctx, phone, `✅ Published. Orders open until ${formatClock(m.cutoffAt, ctx.cfg.tz)}.\nForward the next message to your broadcast lists 👇`);
     await sendText(ctx, phone, formatBroadcast(pub!, ctx.cfg));
     return;
   }
-  if (ctx.cfg.orderChannel === "whatsform") return sendFormKit(ctx, phone, m);
+  if (ctx.cfg.orderChannel !== "bot") return sendFormKit(ctx, phone, m);
   if (ctx.cfg.coexistence) return offerPush(ctx, phone, m);
   await sendText(ctx, phone, `This menu is already ${m.status}. Here's the broadcast again 👇`);
   await sendText(ctx, phone, formatBroadcast(m, ctx.cfg));
@@ -310,7 +310,7 @@ async function dispatch(ctx: Ctx, phone: string, cmd: string, arg: string, msg: 
     case "BROADCAST":
       return cmdMessage(ctx, phone);
     case "ORDERS": {
-      if (ctx.cfg.orderChannel === "whatsform") return cmdFormOrders(ctx, phone);
+      if (ctx.cfg.orderChannel !== "bot") return cmdFormOrders(ctx, phone);
       const m = await ownerMenu(ctx.db, ctx.now(), ctx.cfg.tz);
       if (!m) return sendText(ctx, phone, "No published menu yet.");
       const { rows } = await loadSummaryData(ctx.db, m, ctx.cfg.tz);
@@ -387,7 +387,7 @@ async function dispatch(ctx: Ctx, phone: string, cmd: string, arg: string, msg: 
     case "HELP":
     case "COMMANDS":
       // Menu assistant (WhatsForm flow): the short list, unless they ask for everything.
-      if (ctx.cfg.orderChannel === "whatsform" && !/^all$/i.test(arg)) return sendText(ctx, phone, DAY_HELP);
+      if (ctx.cfg.orderChannel !== "bot" && !/^all$/i.test(arg)) return sendText(ctx, phone, DAY_HELP);
       return sendText(ctx, phone, HELP);
     default:
       return NOT_A_COMMAND;

@@ -32,7 +32,7 @@ const EnvSchema = z.object({
     .string()
     .optional()
     .transform((v) => v === "1" || v === "true"),
-  ORDER_CHANNEL: z.enum(["bot", "whatsform"]).default("bot"),
+  ORDER_CHANNEL: z.enum(["bot", "whatsform", "page"]).default("bot"),
   MENU_TEMPLATE: z.string().default("daily_order_open"),
   MENU_TEMPLATE_LANG: z.string().default("en_US"),
   WA_DRY_RUN: z
@@ -94,9 +94,10 @@ export type Config = {
   /**
    * Where customers order. bot: they message this number. whatsform: they fill in a
    * WhatsForm form, so publishing gives the owner form lines and a broadcast with the form link,
-   * and the cutoff sends no order summary.
+   * and the cutoff sends no order summary. page: our own /order page (docs/order-page.md);
+   * same owner side as whatsform, with the order page link in the broadcast.
    */
-  orderChannel: "bot" | "whatsform";
+  orderChannel: "bot" | "whatsform" | "page";
   /** Utility template sent when a customer's 24 h window is closed (coexistence menu push). */
   menuTemplate: string;
   menuTemplateLang: string;

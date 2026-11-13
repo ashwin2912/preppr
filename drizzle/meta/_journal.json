@@ -71,6 +71,13 @@
       "when": 1794063409303,
       "tag": "0009_perpetual_joseph",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794491908855,
+      "tag": "0010_wandering_felicia_hardy",
+      "breakpoints": true
     }
   ]
 }

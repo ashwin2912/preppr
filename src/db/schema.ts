@@ -126,10 +126,39 @@ export const orders = pgTable(
       .default("draft"),
     confidence: real("confidence"),
     flagged: boolean("flagged").notNull().default(false),
+    /** Why it was flagged, when not the parser (e.g. "new device" on the order page). */
+    flagReason: text("flag_reason"),
+    /** bot: chat ordering; page: the /order web page. */
+    source: text("source", { enum: ["bot", "page"] }).notNull().default("bot"),
+    /** Customer's note for this order (order page). */
+    note: text("note"),
+    /** Delivery address as given with this order (order page), so later edits don't change past deliveries. */
+    address: text("address"),
     createdAt: ts("created_at").notNull().defaultNow(),
     updatedAt: ts("updated_at").notNull().defaultNow(),
   },
   (t) => [unique("orders_menu_customer").on(t.menuId, t.customerPhone)],
+);
+
+/**
+ * Browsers that ordered on the /order page. The cookie holds a random token;
+ * only its sha256 is stored. Untrusted: the phone was typed on a new device for
+ * a number we already knew, so its orders are flagged until the owner trusts it.
+ */
+export const customerDevices = pgTable(
+  "customer_devices",
+  {
+    id: serial("id").primaryKey(),
+    tokenHash: text("token_hash").notNull().unique(),
+    customerPhone: text("customer_phone")
+      .notNull()
+      .references(() => customers.phone),
+    trusted: boolean("trusted").notNull().default(false),
+    createdAt: ts("created_at").notNull().defaultNow(),
+    lastSeenAt: ts("last_seen_at").notNull().defaultNow(),
+    revokedAt: ts("revoked_at"),
+  },
+  (t) => [index("customer_devices_phone").on(t.customerPhone)],
 );
 
 /**
@@ -290,6 +319,7 @@ export type Menu = typeof menus.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type FormResponse = typeof formResponses.$inferSelect;
 export type Order = typeof orders.$inferSelect;
+export type CustomerDevice = typeof customerDevices.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
 export type InboxRow = typeof inbox.$inferSelect;
 export type RawWebhookRow = typeof rawWebhooks.$inferSelect;
