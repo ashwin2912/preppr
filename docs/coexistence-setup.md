@@ -73,9 +73,9 @@ Meta only allows coexistence onboarding through **Embedded Signup**, run by a **
 - **Tech Provider (us):**
   1. Our portfolio gets verified.
   2. The app passes App Review for `whatsapp_business_messaging` and `whatsapp_business_management`.
-  3. We host an Embedded Signup page (v4: `extras.featureType: "whatsapp_business_app_onboarding"`, `sessionInfoVersion: "3"`; v2/v3 were deprecated 2026-10-15).
+  3. We host an Embedded Signup page (v5: coexistence is on by default; v2/v3 were turned off 2026-10-15). Full steps: [`tech-provider.md`](tech-provider.md).
 
-  This takes about 1–3 weeks, but it's direct Cloud API with no per-number fee, and it's also the Stage 3 plan. The signup page isn't built yet.
+  This takes about 1–3 weeks, but it's direct Cloud API with no per-number fee, and it's also the Stage 3 plan. The signup page is built (`src/signup/routes.ts`), not yet run against Meta.
 - **BSP (e.g. 360dialog):** their hosted Embedded Signup does the onboarding. Faster, but there's a monthly fee per number. Point the bot at their API:
   - `WA_API_URL`: their messages endpoint.
   - `WA_AUTH_HEADER`: their API-key header, e.g. `D360-API-KEY`.

@@ -63,6 +63,8 @@ const EnvSchema = z.object({
   SHEET_ID: z.string().optional(),
   META_APP_ID: z.string().optional(),
   ES_CONFIG_ID: z.string().optional(),
+  ES_APP_SECRET: z.string().optional(),
+  ES_GRAPH_VERSION: z.string().default("v27.0"),
 });
 
 export type Config = {
@@ -143,6 +145,14 @@ export type Config = {
   /** Embedded Signup (coexistence onboarding page): Meta app id and Facebook Login for Business configuration id. */
   metaAppId?: string;
   esConfigId?: string;
+  /**
+   * App secret of the Tech Provider app that runs Embedded Signup, when it isn't
+   * the app in WA_APP_SECRET. Used for the code exchange, and also accepted on
+   * webhook signatures so both apps can deliver during the switch-over.
+   */
+  esAppSecret?: string;
+  /** Graph version for the signup page's SDK and the code exchange (production sends keep WA_GRAPH_VERSION). */
+  esGraphVersion: string;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -215,5 +225,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     sheetId: e.SHEET_ID || undefined,
     metaAppId: e.META_APP_ID || undefined,
     esConfigId: e.ES_CONFIG_ID || undefined,
+    esAppSecret: e.ES_APP_SECRET || undefined,
+    esGraphVersion: e.ES_GRAPH_VERSION,
   };
 }

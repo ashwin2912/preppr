@@ -8,6 +8,7 @@ import { registerAdmin } from "./admin/routes";
 import { registerFormWebhook } from "./flows/formOrders";
 import { registerFormMenu } from "./flows/formMenu";
 import { registerOrderPage } from "./flows/orderPage";
+import { registerSignup } from "./signup/routes";
 import { errFields, log } from "./lib/log";
 import { secretEquals } from "./wa/signature";
 import { verifyInbound } from "./wa/provider";
@@ -88,6 +89,7 @@ export function createApp(baseDeps: Deps, workerOpts?: WorkerOptions) {
   registerFormWebhook(app, deps);
   registerFormMenu(app, deps);
   registerOrderPage(app, deps);
+  registerSignup(app, deps);
 
   // X-Job-Secret (original) or Authorization: Bearer (Cloudflare Worker cron).
   const cutoff = async (c: Context) => {

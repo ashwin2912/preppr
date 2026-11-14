@@ -13,12 +13,14 @@ export function createProvider(cfg: Config): WaProvider {
 
 /**
  * Authenticates an inbound webhook. meta: HMAC X-Hub-Signature-256 with the
- * app secret. d360: 360dialog doesn't sign; it echoes the header we set with
+ * app secret (or the Embedded Signup app's, ES_APP_SECRET). d360: 360dialog doesn't sign; it echoes the header we set with
  * the webhook URL (`pnpm wa:webhook:set`), compared in constant time.
  */
 export function verifyInbound(cfg: Config, header: (name: string) => string | undefined, rawBody: string): boolean {
   if (cfg.waProvider === "d360") return secretEquals(header(D360_SECRET_HEADER), cfg.waWebhookSecret);
-  return verifySignature(rawBody, header("x-hub-signature-256"), cfg.waAppSecret);
+  const sig = header("x-hub-signature-256");
+  // During the Tech Provider switch-over both apps may deliver: the original app and the Embedded Signup app.
+  return verifySignature(rawBody, sig, cfg.waAppSecret) || (!!cfg.esAppSecret && verifySignature(rawBody, sig, cfg.esAppSecret));
 }
 
 /** Meta-only setup calls (register, subscribed_apps, business profile, smb_app_data) don't apply under 360dialog. */

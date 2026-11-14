@@ -22,6 +22,7 @@
     "wa:webhook:set": "tsx scripts/wa-webhook-set.ts",
     "wa:templates:sync": "tsx scripts/wa-templates-sync.ts",
     "wa:check": "tsx scripts/wa-check.ts",
+    "wa:signup:env": "tsx scripts/wa-signup-env.ts",
     "orders:from-backup": "tsx scripts/backup-orders.ts",
     "build:mac": "bun build scripts/backup-orders.ts --compile --minify --target=bun-darwin-arm64 --outfile dist/preppr-orders-arm64 && bun build scripts/backup-orders.ts --compile --minify --target=bun-darwin-x64 --outfile dist/preppr-orders-x64 && codesign --force --sign - dist/preppr-orders-arm64 dist/preppr-orders-x64"
   },

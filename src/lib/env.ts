@@ -11,3 +11,19 @@ export function loadDotEnv(path = process.env.ENV_FILE || ".env") {
     process.env[m[1]!] = m[2]!.replace(/^(['"])(.*)\1$/, "$2");
   }
 }
+
+/** Sets KEY=VALUE lines in env-file text: replaces existing (also commented-out) keys in place, appends the rest. */
+export function setEnvLines(text: string, values: Record<string, string>): string {
+  const left = new Map(Object.entries(values));
+  const lines = text.split("\n").map((line) => {
+    const m = line.match(/^\s*#?\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+    const key = m?.[1];
+    if (!key || !left.has(key)) return line;
+    const v = left.get(key)!;
+    left.delete(key);
+    return `${key}=${v}`;
+  });
+  const out = lines.join("\n");
+  const extra = [...left].map(([k, v]) => `${k}=${v}`).join("\n");
+  return extra ? `${out.trim() ? out.replace(/\n*$/, "\n") : ""}${extra}\n` : out;
+}

@@ -15,6 +15,7 @@ import { blockedText, upsertMenu } from "../flows/menuDraft";
 import { formatDay, localDate, zonedInstant } from "../lib/time";
 import { esc, page } from "./html";
 import { readForm, sameOrigin } from "./http";
+import { signSignupToken, signupEnabled } from "../signup/routes";
 
 const SIZE_ROWS = 6;
 const IMPORT_MAX_BYTES = 1_000_000;
@@ -226,6 +227,15 @@ function connectCard(deps: Deps) {
 <p class="muted">The webhook link is private: don't share it.</p></details>`;
 }
 
+/** Embedded Signup: connects the kitchen's WhatsApp Business app number (coexistence). Shown only when signup is configured. */
+function signupCard(deps: Deps) {
+  if (!signupEnabled(deps.cfg)) return "";
+  return `<details class="card"><summary>Connect WhatsApp (one time)</summary>
+<p>Connects your WhatsApp Business app number to Preppr. You keep using the app; customers keep the same chat.</p>
+<p class="muted">Have your phone ready: WhatsApp Business asks you to confirm. Needs version 2.24.17 or newer.</p>
+<form method="post" action="${BASE}/signup"><button class="big">Connect WhatsApp</button></form></details>`;
+}
+
 /**
  * The owner's kitchen page. Today: menu first, then orders, sales, what to
  * make, and the WhatsForm steps. Products: everything she sells. Same sign-in
@@ -264,7 +274,7 @@ export function registerKitchen(app: Hono, deps: Deps, viewer: Viewer, noStore: 
         kpage(
           "Today",
           `${tabs("today")}${flashOf(c)}<div class="card"><h2>${esc(formatDay(today, tz))}</h2><p class="muted">No menu for today yet.</p>${start}</div>
-<div class="off">${statsRow(0, 0, true)}<div class="card prep"><h2>What to make</h2><p class="muted">Shows up once the menu is out.</p></div><div class="card"><h2>Orders</h2></div></div>`,
+<div class="off">${statsRow(0, 0, true)}<div class="card prep"><h2>What to make</h2><p class="muted">Shows up once the menu is out.</p></div><div class="card"><h2>Orders</h2></div></div>${signupCard(deps)}`,
         ),
       );
     }
@@ -285,8 +295,16 @@ export function registerKitchen(app: Hono, deps: Deps, viewer: Viewer, noStore: 
       warn +
       prepCard(m, list) +
       ordersCard(list, tz) +
-      (deps.cfg.orderChannel === "whatsform" ? connectCard(deps) : "");
+      (deps.cfg.orderChannel === "whatsform" ? connectCard(deps) : "") +
+      signupCard(deps);
     return c.html(kpage("Today", body));
+  });
+
+  // A fresh 12-hour signup link, so the token never sits in the kitchen page itself.
+  app.post(`${BASE}/signup`, (c) => {
+    if (!guard(c, true)) return denied(c);
+    if (!signupEnabled(deps.cfg)) return back(c, "WhatsApp connect isn't set up yet.", true);
+    return c.redirect(`/signup?t=${encodeURIComponent(signSignupToken(deps.cfg.adminSecret!, viewer(c)!, deps.now()))}`, 303);
   });
 
   app.get(`${BASE}/menu`, async (c) => {

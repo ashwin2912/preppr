@@ -22,6 +22,7 @@ pnpm wa:sync [--from-db|file.json]  # coexistence history/contacts: meta = reque
 pnpm wa:webhook:set  # d360: set webhook URL + X-Preppr-Secret header, poll until applied
 pnpm wa:templates:sync  # create daily_order_open (utility) if missing, print status
 pnpm wa:check        # key, webhook, template, DB, last inbound: PASS/FAIL/N/A
+pnpm wa:signup:env --file .env.assistant [phone_number_id]  # after Embedded Signup: ids + sealed token → env file (token not printed)
 ```
 
 Before committing: `pnpm typecheck && pnpm test && pnpm build`. The default `.env` LLM may be a retired free model; for `simulate` without a model run `LLM_PROVIDER=anthropic ANTHROPIC_API_KEY= pnpm simulate`.
@@ -48,6 +49,7 @@ Before committing: `pnpm typecheck && pnpm test && pnpm build`. The default `.en
 - `src/flows/formMenu.ts` + `formScript.ts`: one permanent WhatsForm. Its Custom Script loads `/wf.js`, which reads `GET /public/menu.json` (`orderableMenu`: earliest active menu ≥ today before cutoff; no customer data, CORS *) and fills the form's "Your order" text question. Form link saved once (kv `form_link`, `/link`).
 - `src/flows/formOrders.ts` + `src/domain/formOrders.ts`: WhatsForm webhook `/webhooks/whatsform/<token>` → `form_responses` ("Your order" read by `parseOrderText`: script format, then strict `ruleInterpret`; legacy per-dish keys still matched; priced in code, customer upserted, unmatched flagged); `prepTotals` adds up unit sizes (oz/ml/g). Payload shape not yet seen for real.
 - `src/flows/orderPage.ts` + `src/domain/orderPage.ts`: customer order page `/order` (docs/order-page.md). One shared link; first order sets a random device cookie (`customer_devices`, sha256 only), later visits prefilled; a known number on a new browser sees masked details, its order is flagged and can't replace an existing one. Orders go into `orders` (`source = 'page'`), priced with `priceLines`; owner pinged per change via `send()`. `src/flows/dayOrders.ts`: owner views (kitchen page, `/how /what /orders`) over `orders` + `form_responses`. `ORDER_CHANNEL=page` puts the `/order` link in broadcasts. Shared POST checks in `src/admin/http.ts`, in-memory limits in `src/lib/rateLimit.ts`. Kitchen-page menu saves after orders keep item ids (`keepItemIds`) and refuse dropping/repricing ordered dishes.
+- `src/signup/routes.ts`: Embedded Signup (Tech Provider, docs/tech-provider.md). Kitchen page card → signed `/signup` link (own CSP for Meta's SDK) → `/signup/complete` (code exchange with `ES_APP_SECRET`, `subscribed_apps`, kv `signup:<id>` with the token sealed by `src/lib/sealed.ts`). Webhook HMAC accepts `WA_APP_SECRET` or `ES_APP_SECRET`. `pnpm wa:signup:env` writes the ids + token into an env file.
 - `src/db/schema.ts`: Drizzle schema; migrations in `drizzle/` run at startup.
 
 ## Rules that matter
@@ -73,6 +75,7 @@ Before committing: `pnpm typecheck && pnpm test && pnpm build`. The default `.en
 - `docs/deployment-plan.md`: how to deploy one kitchen, and how to productize for many.
 - `docs/production-readiness.md`: launch checklist and status.
 - `docs/owner-assistant.md`: owner-only menu assistant for the WhatsForm flow (commands, setup on a test number, smoke test). `docs/whatsform-interim.md`: the WhatsForm stopgap itself. `docs/order-page.md`: our own `/order` page that replaces it.
+- `docs/tech-provider.md`: becoming a Meta Tech Provider (verification, App Review, Embedded Signup), with instructions for a browser-driving session.
 - `docs/coexistence-setup.md`: bot on the owner's existing number (current plan for the first kitchen): behavior, menu template, onboarding, smoke test.
 - `docs/meta-setup.md`, `docs/google-sheet-setup.md`, `docs/monitoring.md` (alerts + runbook), `docs/owner-setup.md` (for the kitchen owner).
 - `system-design.md`: original architecture and laptop setup (partly superseded by the inbox/outbox design in README "Design notes").
