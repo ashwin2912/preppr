@@ -78,40 +78,33 @@ Before committing: `pnpm typecheck && pnpm test && pnpm build`. The default `.en
 - `docs/tech-provider.md`: becoming a Meta Tech Provider (verification, App Review, Embedded Signup), with instructions for a browser-driving session.
 - `docs/coexistence-setup.md`: bot on the owner's existing number (current plan for the first kitchen): behavior, menu template, onboarding, smoke test.
 - `docs/meta-setup.md`, `docs/google-sheet-setup.md`, `docs/monitoring.md` (alerts + runbook), `docs/owner-setup.md` (for the kitchen owner).
-- `system-design.md`: original architecture and laptop setup (partly superseded by the inbox/outbox design in README "Design notes").
+- `docs/system-design.md`: original architecture and laptop setup (historical; superseded by the inbox/outbox design in README "Design notes").
 
-## Status (2026-11-12)
+## Status (2026-11-14)
 
-- **Order page built (branch `order-page`)**, tested with the harness; not yet deployed or tried on a real phone. Switch-over steps: docs/order-page.md.
+**Running now** (deployed 2026-11-07, Railway `preppr-production.up.railway.app`, Neon `preppr`/`main`, Groq model): owner assistant + kitchen page on Meta's test number in the kitchen's portfolio. `OWNER_ONLY=1`, `ORDER_CHANNEL=whatsform`. Owner uses the kitchen page (`/app`) for dishes and the daily menu, `/how` `/what` `/orders` `/message` on WhatsApp; customers order through one permanent WhatsForm (`docs/whatsform-interim.md`), orders arrive by webhook into `form_responses` (payload shape not yet seen for real). Details: `docs/README.md`. Variables: `.env.assistant` → `sh scripts/railway-push-env.sh` → `railway up` (never `railway redeploy`).
 
-## Status (2026-11-07)
+**Built, not deployed** (tested with fakes only):
+- Full bot: ordering flows, owner commands, payments/ledger, cutoff, watchdog, delivery statuses, Sheet sync, chat viewer, contact and chat-export import.
+- Coexistence on the owner's existing WhatsApp Business number (decided 2026-10-28; owner commands from a personal number). Not tried against a real coexistence number.
+- 360dialog provider (2026-11-05): not run against the sandbox. Echo and template sync can't be tested there. History for direct clients likely comes from the Hub (`pnpm wa:sync <file>`).
+- `/order` page (2026-11-12): replaces WhatsForm behind `ORDER_CHANNEL=page`; not tried on a real phone. Switch-over: `docs/order-page.md`.
+- Embedded Signup (2026-11-14): kitchen page card → `/signup`; needs the Tech Provider app (`docs/tech-provider.md`, Progress section).
+- Pilot-on-a-laptop files (`deploy/pilot/`: Compose + cloudflared + cutoff cron Worker): config-checked, never run; Railway is used instead.
 
-- **Interim: WhatsForm for order capture** while the bot is built (`docs/whatsform-interim.md`). Owner broadcasts a per-day form (one number question per dish+size), orders land in a Google Sheet; totals per dish are v2.
-- **Owner assistant + kitchen page: deployed (2026-11-07)** on Railway (`preppr-production.up.railway.app`), Neon `preppr`/`main`, Groq model, Meta test number in the kitchen's business portfolio. `OWNER_ONLY=1`, `ORDER_CHANNEL=whatsform`. Owner uses the kitchen page (`/app`) for dishes and the daily menu, and `/how` `/what` `/orders` `/message` on WhatsApp. WhatsForm orders arrive by webhook into `form_responses` (payload shape not yet verified with a real submission). What's running, where data lives and the backlog: `docs/README.md`. Variables: `.env.assistant` → `sh scripts/railway-push-env.sh` → `railway up` (never `railway redeploy`).
-
-- **Plan: staging kitchen before the real phone** (docs/deploy.md "Staging"). A number we own runs in the WhatsApp Business app, is onboarded to 360dialog with coexistence (our account), and has its own `.env.staging`, Neon branch and tunnel. Every script and the prod compose read `$ENV_FILE` when set. Use it to rehearse switch-over, capture real coexistence payloads into fixtures, and get kitchen feedback.
-
-## Status (2026-11-05)
-
-- **360dialog provider built (2026-11-05)**, tested with fakes and fixtures; not yet run against the sandbox or the real number. Voice-note/image download + transcription is backlog (docs/production-readiness.md). Echo and template sync can't be tested on the sandbox; check them on onboarding day. History for direct 360dialog clients likely comes from the Hub, not our webhook: check the real file with `pnpm wa:sync <file>`.
-
-## Status (2026-10-28)
-
-- **Built and tested (fakes):** ordering flows, owner commands, payments/ledger, cutoff, watchdog alerts, delivery statuses, Sheet sync, chat viewer, contact import, chat-export import.
-- **Stage 0 pilot, first kitchen: in progress.**
-  - Hosting decided: laptop now, small VPS later, same `deploy/pilot/docker-compose.yml` (app + `cloudflared` named tunnel), Neon free tier, cutoff via Cloudflare Worker cron (`deploy/pilot/cutoff-cron`). App can't run on Cloudflare Workers/Containers (long-running worker), so Cloudflare is only tunnel + cron.
-  - Pilot files checked: Compose config valid, Worker bundles (`wrangler deploy --dry-run`), app endpoints and cutoff auth checked with `node dist/index.js`. Not yet run under Docker or against Meta.
-  - Meta: the kitchen owner owns the business portfolio and WABA; we are invited as admin and do the app, system-user token and webhook. Week 1 on Meta's test number (owner + up to 4 customers). Owner instructions were sent as WhatsApp messages (not in the repo).
-  - **Number (decided 2026-10-28): coexistence on the owner's existing WhatsApp Business number**, so customers and history stay in one chat. Owner commands come from the owner's personal number. Code built and tested with fakes (`test/coexistence.test.ts`). Not yet tried against a real coexistence number.
-  - Onboarding path still open: become a Tech Provider (Embedded Signup page not built yet) or use a BSP (`WA_API_URL`, `WA_AUTH_HEADER`).
-- **Next:** owner finishes portfolio + verification + admin invite; buy domain on Cloudflare, create tunnel, Neon project, fill `.env`; run the Compose stack on the laptop; webhook on test number; smoke test (`docs/pilot-cloudflare.md` step 9). Then: choose Tech Provider or BSP, submit the `daily_order_open` utility template, onboard the owner's number, `pnpm wa:sync` within 24 h, coexistence smoke test (`docs/coexistence-setup.md`).
+**Next:**
+1. Tech Provider dashboard steps (new portfolio + app, Login for Business config, webhook), deploy, real signup with a test number. Business verification and App Review after that.
+2. Or BSP instead (360dialog, `docs/360dialog.md`).
+3. Then: `daily_order_open` utility template, onboard the owner's number, `pnpm wa:sync` within 24 h, coexistence smoke test (`docs/coexistence-setup.md`).
+4. Staging kitchen first if time allows (`docs/deploy.md` "Staging": our own number, `.env.staging`, own Neon branch).
 
 ## Open items
 
 - `preppr-orders` (iPhone backup tool) tested only on a synthetic backup; confirm domain, ChatStorage columns, `@lid` share and message types with `--check` on the owner's Mac. Binaries need a public host (`PREPPR_BASE_URL` in `deploy/mac/install.sh`).
 - Parser not yet evaluated on real customer messages (collect with `pnpm import:chat-export --fixtures`, or from the coexistence history sync: `messages.source = 'history'`).
 - Coexistence webhook payload shapes (`message_echoes`, `history`, `state_sync`) are from Meta/BSP docs, parsed loosely; check them against real payloads on onboarding day.
-- Not yet deployed with a permanent database; the Sheet and Sentry integrations are tested only against fakes/mocks.
+- The Sheet and Sentry integrations are tested only against fakes/mocks.
 - `docs/deployment-plan.md` refers to a README "How to test" checklist that doesn't exist; the pilot smoke list is in `docs/pilot-cloudflare.md`.
+- Voice-note/image download + transcription is backlog (docs/production-readiness.md).
 - CI runs tests on PGlite only; a real-Postgres CI job is still to add.
 - Migrations run at startup on every instance; for multi-instance deploys run `pnpm db:migrate` as a separate step (see deployment plan).

@@ -1,5 +1,7 @@
 # System design: WhatsApp tiffin ordering bot
 
+> **Historical (written Oct 2026).** Original architecture and the always-on-laptop setup. Superseded where they differ by the inbox/outbox design in README "Design notes", hosting in `deploy.md` / `pilot-cloudflare.md` (Railway is what runs now, see `README.md` in this folder), and Embedded Signup in `tech-provider.md`.
+
 How the MVP works: who talks to whom, where data lives, and what runs when. The last sections cover running it on an always-on laptop and what to improve next.
 
 The target setup is **coexistence** (the bot on the owner's existing WhatsApp Business number); sections 1–2 describe it. Message handling, the inbox/outbox worker and the data model below are the same with or without coexistence. Details: `docs/coexistence-setup.md`.

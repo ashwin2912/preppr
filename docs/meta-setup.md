@@ -94,7 +94,7 @@ The phone receives "Hello World". (This uses Meta's sample template. The bot its
 
 The bot must be reachable at a public HTTPS URL first:
 
-- **Laptop:** a named Cloudflare tunnel or an ngrok static domain; see [`../system-design.md`](../system-design.md#10-running-on-an-always-on-laptop). Don't use a quick tunnel: its URL changes on every restart.
+- **Laptop:** a named Cloudflare tunnel or an ngrok static domain; see [`system-design.md`](system-design.md#10-running-on-an-always-on-laptop). Don't use a quick tunnel: its URL changes on every restart.
 - **Cloud Run:** the service URL.
 
 Then:

@@ -132,7 +132,7 @@ CSV header: `phone,name,area,address_note` (optional extra column `notes`). Phon
 - [docs/monitoring.md](docs/monitoring.md): Sentry and UptimeRobot setup, what each alert means, runbook.
 - [docs/google-sheet-setup.md](docs/google-sheet-setup.md): Google Sheet export of orders, customers and payments.
 - [docs/production-readiness.md](docs/production-readiness.md): what's left before launch, reliability work, parsing cost options.
-- [system-design.md](system-design.md): architecture and flow diagrams, running on a laptop.
+- [docs/system-design.md](docs/system-design.md): architecture and flow diagrams, running on a laptop.
 
 ## Deploy (Cloud Run + Cloud Scheduler)
 

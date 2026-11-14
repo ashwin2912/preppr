@@ -105,7 +105,7 @@ Today a voice note or photo gets "Please type your order" and is forwarded to th
 | Setup | Tunnel, cron, pm2, no-sleep settings | `gcloud run deploy` + Cloud Scheduler |
 | Recommendation | Fine for the test-number phase and the pilot | Move here before full rollout |
 
-Both run the same code. Laptop setup is in [`../system-design.md`](../system-design.md#10-running-on-an-always-on-laptop); Cloud Run deploy commands are in the [README](../README.md#deploy-cloud-run--cloud-scheduler).
+Both run the same code. Laptop setup is in [`system-design.md`](system-design.md#10-running-on-an-always-on-laptop); Cloud Run deploy commands are in the [README](../README.md#deploy-cloud-run--cloud-scheduler).
 
 ---
 
